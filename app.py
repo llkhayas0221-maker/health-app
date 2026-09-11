@@ -205,27 +205,23 @@ with tab2:
                 st.subheader("🔮 目標達成予測 (直近トレンド分析)")
                 
                 if len(df_clean) >= 5:
-                    # 直近14日間のデータに絞る
                     df_recent = df_clean.tail(14).copy()
                     df_recent['parsed_date'] = pd.to_datetime(df_recent['日付'], errors='coerce')
                     df_recent = df_recent.dropna(subset=['parsed_date']).sort_values('parsed_date')
                     
                     if len(df_recent) >= 2:
-                        # 日数の差分（日）と体重・体脂肪率の変化量を計算
                         start_date = df_recent['parsed_date'].iloc[0]
                         end_date = df_recent['parsed_date'].iloc[-1]
                         total_days = (end_date - start_date).days
                         
                         if total_days > 0:
-                            # 体重のトレンド予測
                             start_w = df_recent['朝の体重(kg)'].iloc[0]
                             end_w = df_recent['朝の体重(kg)'].iloc[-1]
-                            daily_w_change = (end_w - start_w) / total_days  # 1日あたりの変化量（kg/日）
+                            daily_w_change = (end_w - start_w) / total_days
                             
-                            # 体脂肪率のトレンド予測
                             start_f = df_recent['体脂肪率(%)'].iloc[0]
                             end_f = df_recent['体脂肪率(%)'].iloc[-1]
-                            daily_f_change = (end_f - start_f) / total_days  # 1日あたりの変化量（%/日）
+                            daily_f_change = (end_f - start_f) / total_days
                             
                             col_p1, col_p2 = st.columns(2)
                             
@@ -257,7 +253,7 @@ with tab2:
                     else:
                         st.info("直近の有効な日付データが不足しています。")
                 else:
-                    st.info(f"⏳ ああと {5 - len(df_clean)} 日分のデータを入力すると、直近のトレンドに基づいた目標達成予測が表示されます！")
+                    st.info(f"⏳ あと {5 - len(df_clean)} 日分のデータを入力すると、直近のトレンドに基づいた目標達成予測が表示されます！")
 
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.markdown("---")
@@ -277,7 +273,7 @@ with tab2:
                     y=alt.Y('体脂肪率(%)', scale=alt.Scale(zero=False), title='体脂肪率(%)'),
                     tooltip=['日付', '体脂肪率(%)']
                 )
-                target_f_rule = alt.Chart(pd.DataFrame({'target': [current_target_f]})).mark_rule(color='orange', strokeDash=5, 5).encode(y='target')
+                target_f_rule = alt.Chart(pd.DataFrame({'target': [current_target_f]})).mark_rule(color='orange', strokeDash=[5, 5]).encode(y='target')
                 st.altair_chart(fat_line + target_f_rule, use_container_width=True)
             else:
                 st.info("有効な数値データがありません。")
