@@ -8,7 +8,7 @@ import os
 
 # --- ページ設定とテーマ ---
 st.set_page_config(page_title="健康管理アプリ", page_icon="💪", layout="centered")
-st.title("健康管理")
+st.title("健康管理ダッシュボード")
 
 # --- スプレッドシートの連携設定 ---
 scopes = [
@@ -29,11 +29,23 @@ except Exception as e:
     st.error(f"接続エラー\n{e}")
     st.stop()
 
-# --- セッション状態の初期化（目標値の保持用） ---
+# --- スプレッドシートから保存された目標値を読み込む ---
+try:
+    # L1セル（12列目）に目標体重、M1セル（13列目）に目標体脂肪率を保存する仕様にします
+    saved_w_val = worksheet.cell(1, 12).value
+    saved_f_val = worksheet.cell(1, 13).value
+    
+    default_target_w = float(saved_w_val) if saved_w_val and str(saved_w_val).strip() != "" else 60.0
+    default_target_f = float(saved_f_val) if saved_f_val and str(saved_f_val).strip() != "" else 15.0
+except Exception:
+    default_target_w = 60.0
+    default_target_f = 15.0
+
+# セッション状態の初期化
 if 'saved_target_weight' not in st.session_state:
-    st.session_state.saved_target_weight = 60.0
+    st.session_state.saved_target_weight = default_target_w
 if 'saved_target_fat' not in st.session_state:
-    st.session_state.saved_target_fat = 15.0
+    st.session_state.saved_target_fat = default_target_f
 
 # --- タブの作成 ---
 tab1, tab2 = st.tabs(["📝 記録する", "📈 データを見る"])
@@ -155,11 +167,16 @@ with tab2:
     temp_target_weight = st.sidebar.number_input("目標体重 (kg)", value=st.session_state.saved_target_weight, step=0.1)
     temp_target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=st.session_state.saved_target_fat, step=0.1)
 
-    # 変更を保存ボタン
+    # 変更を保存ボタン（スプレッドシートのL1/M1セルに書き込む）
     if st.sidebar.button("変更を保存する"):
         st.session_state.saved_target_weight = temp_target_weight
         st.session_state.saved_target_fat = temp_target_fat
-        st.sidebar.success("目標を保存しました！✨")
+        try:
+            worksheet.update_cell(1, 12, temp_target_weight)
+            worksheet.update_cell(1, 13, temp_target_fat)
+            st.sidebar.success("目標をスプレッドシートに保存しました！✨")
+        except Exception as e:
+            st.sidebar.error(f"保存エラー: {e}")
 
     # 現在有効な目標値
     current_target_w = st.session_state.saved_target_weight
@@ -183,7 +200,7 @@ with tab2:
 
                 if latest_weight <= current_target_w and latest_fat <= current_target_f:
                     st.balloons()
-                    st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しましょう。")
+                    st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
 
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.write("■ 朝の体重 (kg)")
