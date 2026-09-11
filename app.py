@@ -6,11 +6,32 @@ import pandas as pd
 import altair as alt
 import os
 import numpy as np
-import io
 
 # --- ページ設定とテーマ ---
 st.set_page_config(page_title="健康管理アプリ", page_icon="💪", layout="centered")
-st.title("健康管理ダッシュボード")
+st.title("健康管理")
+
+# --- カスタムCSS ---
+st.markdown("""
+    <style>
+    div.row-widget.stRadio > div{
+        flex-direction:row;
+        justify-content: center;
+    }
+    div.row-widget.stRadio > div > label{
+        background-color: #f0f2f6;
+        padding: 10px 20px;
+        border-radius: 10px;
+        margin: 0 5px;
+        cursor: pointer;
+    }
+    @media (prefers-color-scheme: dark) {
+        div.row-widget.stRadio > div > label{
+            background-color: #262730;
+        }
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- スプレッドシートの連携設定 ---
 scopes = [
@@ -31,7 +52,7 @@ except Exception as e:
     st.error(f"接続エラー\n{e}")
     st.stop()
 
-# --- 目標値の読み込み（Z1セル・AA1セル） ---
+# --- 目標値の読み込み ---
 try:
     saved_w_val = worksheet.cell(1, 26).value
     saved_f_val = worksheet.cell(1, 27).value
@@ -46,11 +67,11 @@ if 'saved_target_weight' not in st.session_state:
 if 'saved_target_fat' not in st.session_state:
     st.session_state.saved_target_fat = default_target_f
 
-# CSVデータを保持するセッション
-if 'band_data' not in st.session_state:
-    st.session_state.band_data = {}
+if 'active_tab' not in st.session_state:
+    st.session_state.active_tab = "📝 記録する"
+if 'success_msg' not in st.session_state:
+    st.session_state.success_msg = ""
 
-# --- ヘッダーの基本設定（A列〜N列） ---
 HEADER_DEFAULT = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "総消費カロリー(kcal)", "摂取カロリー(kcal)", "カロリーマイナス(kcal)", "備考"]
 
 # --- カロリー計算関数 ---
@@ -85,73 +106,153 @@ def calc_calories_for_sheet(w_str, f_str, p_str, lipid_str, c_str, active_cals_s
     except:
         return "", "", ""
 
-# --- CSV解析関数 ---
-def parse_smartband_csv(df):
-    parsed = {}
-    # アプリによって表記が違うカラム名を柔軟に探す
-    date_col = next((c for c in df.columns if any(x in c.lower() for x in ['date', '日付', '時間', 'time'])), None)
-    step_col = next((c for c in df.columns if any(x in c.lower() for x in ['step', '歩数', '歩'])), None)
-    sleep_col = next((c for c in df.columns if any(x in c.lower() for x in ['sleep', '睡眠'])), None)
+# ==========================================
+# 📊 データの一括読み込み（サイドバー・グラフ共通）
+# ==========================================
+df = pd.DataFrame()
+try:
+    data = worksheet.get('A:N')
+    if data and len(data) > 1:
+        header = HEADER_DEFAULT.copy()
+        valid_rows = []
+        for r in data[1:]:
+            padded = r + [""] * (14 - len(r))
+            valid_rows.append(padded[:14])
+        df = pd.DataFrame(valid_rows, columns=header)
+except Exception as e:
+    pass
 
-    if date_col:
-        for _, row in df.iterrows():
-            try:
-                d = pd.to_datetime(row[date_col]).strftime("%Y/%m/%d")
-                if d not in parsed:
-                    parsed[d] = {}
+# ==========================================
+# 🛡️ サイドバー（目標設定 ＆ 塔の探索ステータス）
+# ==========================================
+st.sidebar.subheader("🎯 目標設定")
+temp_target_weight = st.sidebar.number_input("目標体重 (kg)", value=st.session_state.saved_target_weight, step=0.1)
+temp_target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=st.session_state.saved_target_fat, step=0.1)
+
+if st.sidebar.button("変更を保存する"):
+    st.session_state.saved_target_weight = temp_target_weight
+    st.session_state.saved_target_fat = temp_target_fat
+    try:
+        worksheet.update_cell(1, 26, temp_target_weight)
+        worksheet.update_cell(1, 27, temp_target_fat)
+        st.sidebar.success("目標を保存しました！✨")
+    except Exception as e:
+        st.sidebar.error(f"保存エラー: {e}")
+
+streak = 0
+if not df.empty:
+    # 連続記録（ストリーク）の計算
+    try:
+        valid_dates = pd.to_datetime(df['日付'], errors='coerce').dropna().dt.date.unique()
+        valid_dates = sorted(valid_dates, reverse=True)
+        check_date = date.today()
+        if check_date not in valid_dates:
+            check_date = date.today() - timedelta(days=1)
+        while check_date in valid_dates:
+            streak += 1
+            check_date -= timedelta(days=1)
+    except Exception:
+        pass
+
+    # RPG計算
+    df_rpg = df.copy()
+    df_rpg['parsed_date'] = pd.to_datetime(df_rpg['日付'], errors='coerce')
+    df_rpg = df_rpg.dropna(subset=['parsed_date']).sort_values('parsed_date')
+    
+    ascension = 0
+    current_ascension_exp = 0
+    current_ascension_minus_days = 0
+    current_ascension_exercise_days = 0
+    ranks = []
+    
+    for index, row in df_rpg.iterrows():
+        day_exp = 20 # 記録するだけで+20EXP
+        
+        # カロリーマイナス達成
+        minus = pd.to_numeric(row.get('カロリーマイナス(kcal)', np.nan), errors='coerce')
+        if pd.notna(minus) and minus > 0:
+            day_exp += 40
+            current_ascension_minus_days += 1
+            
+        # 運動達成
+        exercise = str(row.get('運動内容', 'なし'))
+        if exercise != 'なし' and exercise.strip() != '':
+            day_exp += 30
+            current_ascension_exercise_days += 1
+            
+        # 歩数達成
+        steps_val = pd.to_numeric(row.get('歩数', np.nan), errors='coerce')
+        if pd.notna(steps_val) and steps_val >= 8000:
+            day_exp += 10
+            
+        current_ascension_exp += day_exp
+        
+        # 3000 EXP到達でアセンションクリア（ボス戦評価）
+        while current_ascension_exp >= 3000:
+            if current_ascension_minus_days >= 20 and current_ascension_exercise_days >= 15:
+                ranks.append('S')
+            elif current_ascension_minus_days >= 15 or current_ascension_exercise_days >= 10:
+                ranks.append('A')
+            elif current_ascension_minus_days >= 10:
+                ranks.append('B')
+            else:
+                ranks.append('C')
                 
-                if step_col and pd.notna(row[step_col]):
-                    parsed[d]['steps'] = int(row[step_col])
-                    
-                if sleep_col and pd.notna(row[sleep_col]):
-                    val = row[sleep_col]
-                    # もし分単位(例:450)で入っていたら時間表記(7h30m)に直す
-                    if isinstance(val, (int, float)) or str(val).isnumeric():
-                        mins = int(val)
-                        parsed[d]['sleep'] = f"{mins//60}h{mins%60}m"
-                    else:
-                        parsed[d]['sleep'] = str(val)
-            except Exception:
-                continue
-    return parsed
+            ascension += 1
+            current_ascension_exp -= 3000
+            current_ascension_minus_days = 0
+            current_ascension_exercise_days = 0
+            
+    best_rank = "なし"
+    rank_order = {'S': 4, 'A': 3, 'B': 2, 'C': 1}
+    if ranks:
+        best_rank = max(ranks, key=lambda x: rank_order[x])
+        
+    current_floor = current_ascension_exp // 100 + 1
+    floor_exp = current_ascension_exp % 100
+    
+    # アセンション称号
+    if ascension == 0:
+        title = "見習い探索者"
+    elif ascension < 3:
+        title = "中堅の登頂者"
+    elif ascension < 5:
+        title = "熟練の登頂者"
+    else:
+        title = "傾斜と筋肉の求道者"
 
-# --- タブの作成 ---
-tab1, tab2 = st.tabs(["📝 記録する", "📈 データを見る"])
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⚔️ 探索ステータス")
+    st.sidebar.markdown(f"**称号**: {title}")
+    st.sidebar.markdown(f"**🌟 アセンション**: {ascension}")
+    st.sidebar.markdown(f"**🚩 現在**: 第 {current_floor} 階層")
+    
+    st.sidebar.progress(floor_exp / 100)
+    st.sidebar.caption(f"💡 あと {100 - floor_exp} EXP で次の階層へ！")
+    
+    if best_rank != "なし":
+        st.sidebar.markdown(f"**🏆 過去最高ランク**: Rank {best_rank}")
 
-with tab1:
+    if streak > 0:
+        st.sidebar.markdown(f"<div style='text-align: left; color: #888; font-size: 0.9em; margin-top: 15px;'>🔥 {streak}日間 記録継続中</div>", unsafe_allow_html=True)
+
+
+# ==========================================
+# 📱 メイン画面のタブ切り替え
+# ==========================================
+selected_tab = st.radio("メニュー", ["📝 記録する", "📈 データを見る"], horizontal=True, label_visibility="collapsed", key="active_tab")
+
+if selected_tab == "📝 記録する":
     st.write("今日のデータを入力してください")
     
-    # 日付選択を外に出すことで、CSVアップロードと連携しやすくする
-    record_date = st.date_input("📝 記録する日付", value=date.today())
-    date_str = record_date.strftime("%Y/%m/%d")
-
-    # --- スマートバンドのCSVアップロード ---
-    with st.expander("⌚ スマートバンドのデータを取り込む (CSV)"):
-        uploaded_file = st.file_uploader("Mi Fitnessなどの歩数・睡眠CSVを選択", type=["csv"])
-        if uploaded_file is not None:
-            try:
-                df_csv = pd.read_csv(uploaded_file)
-                st.session_state.band_data = parse_smartband_csv(df_csv)
-                if st.session_state.band_data:
-                    st.success("CSVデータの読み込みに成功しました！下の入力欄に自動反映されます✨")
-                else:
-                    st.warning("日付や歩数のデータがうまく見つかりませんでした。")
-            except Exception as e:
-                st.error("CSVファイルの読み込みエラーです。")
-
-    # 指定した日付の自動入力データを取得
-    auto_steps = st.session_state.band_data.get(date_str, {}).get('steps', None)
-    auto_sleep = st.session_state.band_data.get(date_str, {}).get('sleep', "")
-
     with st.form(key='record_form', clear_on_submit=True):
-        
         st.subheader("基本データ")
+        record_date = st.date_input("📝 記録する日付", value=date.today())
+        
         weight = st.number_input("朝の体重 (kg)", min_value=0.0, format="%.1f", step=0.1, value=None)
         body_fat = st.number_input("体脂肪率 (%)", min_value=0.0, format="%.1f", step=0.1, value=None)
-        
-        # CSVデータがあれば初期値としてセット
-        sleep_time = st.text_input("睡眠時間 (例: 7h30m)", value=auto_sleep)
-        steps = st.number_input("歩数", min_value=0, step=100, value=auto_steps)
+        sleep_time = st.text_input("睡眠時間 (例: 7h30m)", value="")
+        steps = st.number_input("歩数", min_value=0, step=100, value=None)
 
         st.subheader("運動")
         exercise_options = ["なし", "筋トレ→傾斜", "傾斜ウォーキング", "ランニング", "その他"]
@@ -172,7 +273,10 @@ with tab1:
         submit_button = st.form_submit_button(label='シートに記録する')
 
         if submit_button:
+            date_str = record_date.strftime("%Y/%m/%d")
+            
             try:
+                # 記録時に最新データを再取得（コンフリクト防止）
                 all_values = worksheet.get('A:N')
                 
                 if not all_values:
@@ -255,60 +359,19 @@ with tab1:
                     except TypeError:
                         worksheet.update("A1", data_to_write)
                         
-                    st.success(f"{date_str} のデータを統合・保存しました！🎉")
+                    st.session_state.success_msg = f"{date_str} のデータを統合・保存しました！🎉"
+                    st.session_state.active_tab = "📈 データを見る"
+                    st.rerun()
                     
             except Exception as e:
                 st.error(f"書き込みエラー（データは保護されています）: {e}")
 
-with tab2:
+elif selected_tab == "📈 データを見る":
+    if st.session_state.success_msg:
+        st.success(st.session_state.success_msg)
+        st.session_state.success_msg = ""
+        
     st.subheader("体重と体脂肪率の推移")
-    
-    # --- データ読み込み（A〜N列のみ） ---
-    df = pd.DataFrame()
-    try:
-        data = worksheet.get('A:N')
-        if data and len(data) > 1:
-            header = HEADER_DEFAULT.copy()
-            valid_rows = []
-            for r in data[1:]:
-                padded = r + [""] * (14 - len(r))
-                valid_rows.append(padded[:14])
-            df = pd.DataFrame(valid_rows, columns=header)
-    except Exception as e:
-        st.warning(f"データの読み込みに失敗しました。詳細: {e}")
-    
-    # --- ストリーク（連続記録）の計算 ---
-    streak = 0
-    if not df.empty:
-        try:
-            valid_dates = pd.to_datetime(df['日付'], errors='coerce').dropna().dt.date.unique()
-            valid_dates = sorted(valid_dates, reverse=True)
-            check_date = date.today()
-            if check_date not in valid_dates:
-                check_date = date.today() - timedelta(days=1)
-            while check_date in valid_dates:
-                streak += 1
-                check_date -= timedelta(days=1)
-        except Exception:
-            pass
-
-    # --- サイドバー：目標設定 ---
-    st.sidebar.subheader("🎯 目標設定")
-    temp_target_weight = st.sidebar.number_input("目標体重 (kg)", value=st.session_state.saved_target_weight, step=0.1)
-    temp_target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=st.session_state.saved_target_fat, step=0.1)
-
-    if st.sidebar.button("変更を保存する"):
-        st.session_state.saved_target_weight = temp_target_weight
-        st.session_state.saved_target_fat = temp_target_fat
-        try:
-            worksheet.update_cell(1, 26, temp_target_weight)
-            worksheet.update_cell(1, 27, temp_target_fat)
-            st.sidebar.success("目標をスプレッドシートに保存しました！✨")
-        except Exception as e:
-            st.sidebar.error(f"保存エラー: {e}")
-            
-    if streak > 0:
-        st.sidebar.markdown(f"<div style='text-align: left; color: #888; font-size: 0.9em; margin-top: 10px;'>🔥 {streak}日間 記録継続中</div>", unsafe_allow_html=True)
 
     current_target_w = st.session_state.saved_target_weight
     current_target_f = st.session_state.saved_target_fat
@@ -317,7 +380,7 @@ with tab2:
         df['朝の体重(kg)'] = pd.to_numeric(df.get('朝の体重(kg)', []), errors='coerce')
         df['体脂肪率(%)'] = pd.to_numeric(df.get('体脂肪率(%)', []), errors='coerce')
         
-        df_clean = df.dropna(subset=['朝の体重(kg)', '体脂肪率(%)'])
+        df_clean = df.dropna(subset=['朝の体重(kg)', '体脂肪率(%)']).copy()
 
         if not df_clean.empty:
             latest_row = df_clean.iloc[-1]
@@ -328,7 +391,8 @@ with tab2:
                 st.balloons()
                 st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
 
-            with st.expander("🔮 目標達成予測を見る (直近トレンド分析)"):
+            # ★ テキスト変更反映（絵文字消去・直近線型回帰分析）
+            with st.expander("目標達成予測を見る (直近線型回帰分析)"):
                 if len(df_clean) >= 5:
                     df_recent = df_clean.tail(14).copy()
                     df_recent['parsed_date'] = pd.to_datetime(df_recent['日付'], errors='coerce')
@@ -381,23 +445,38 @@ with tab2:
                     st.info(f"⏳ あと {5 - len(df_clean)} 日分のデータを入力すると、直近のトレンドに基づいた目標達成予測が表示されます！")
 
             st.markdown("---")
-            st.write("■ 朝の体重 (kg)")
-            weight_line = alt.Chart(df_clean).mark_line(point=True).encode(
-                x=alt.X('日付', title='日付', sort=None),
-                y=alt.Y('朝の体重(kg)', scale=alt.Scale(zero=False), title='体重(kg)'),
-                tooltip=['日付', '朝の体重(kg)']
-            )
-            target_w_rule = alt.Chart(pd.DataFrame({'target': [current_target_w]})).mark_rule(color='red', strokeDash=[5, 5]).encode(y='target')
-            st.altair_chart(weight_line + target_w_rule, use_container_width=True)
+            graph_period = st.radio("グラフの表示期間", ["1ヶ月", "3ヶ月", "全期間"], horizontal=True)
+            
+            df_plot = df_clean.copy()
+            df_plot['parsed_date_for_plot'] = pd.to_datetime(df_plot['日付'], errors='coerce')
+            
+            if graph_period == "1ヶ月":
+                cutoff = pd.to_datetime(date.today() - timedelta(days=30))
+                df_plot = df_plot[df_plot['parsed_date_for_plot'] >= cutoff]
+            elif graph_period == "3ヶ月":
+                cutoff = pd.to_datetime(date.today() - timedelta(days=90))
+                df_plot = df_plot[df_plot['parsed_date_for_plot'] >= cutoff]
 
-            st.write("■ 体脂肪率 (%)")
-            fat_line = alt.Chart(df_clean).mark_line(point=True, color='orange').encode(
-                x=alt.X('日付', title='日付', sort=None),
-                y=alt.Y('体脂肪率(%)', scale=alt.Scale(zero=False), title='体脂肪率(%)'),
-                tooltip=['日付', '体脂肪率(%)']
-            )
-            target_f_rule = alt.Chart(pd.DataFrame({'target': [current_target_f]})).mark_rule(color='orange', strokeDash=[5, 5]).encode(y='target')
-            st.altair_chart(fat_line + target_f_rule, use_container_width=True)
+            if df_plot.empty:
+                st.info(f"選択した期間（{graph_period}）のデータがありません。")
+            else:
+                st.write("■ 朝の体重 (kg)")
+                weight_line = alt.Chart(df_plot).mark_line(point=True).encode(
+                    x=alt.X('日付', title='日付', sort=None),
+                    y=alt.Y('朝の体重(kg)', scale=alt.Scale(zero=False), title='体重(kg)'),
+                    tooltip=['日付', '朝の体重(kg)']
+                )
+                target_w_rule = alt.Chart(pd.DataFrame({'target': [current_target_w]})).mark_rule(color='red', strokeDash=[5, 5]).encode(y='target')
+                st.altair_chart(weight_line + target_w_rule, use_container_width=True)
+
+                st.write("■ 体脂肪率 (%)")
+                fat_line = alt.Chart(df_plot).mark_line(point=True, color='orange').encode(
+                    x=alt.X('日付', title='日付', sort=None),
+                    y=alt.Y('体脂肪率(%)', scale=alt.Scale(zero=False), title='体脂肪率(%)'),
+                    tooltip=['日付', '体脂肪率(%)']
+                )
+                target_f_rule = alt.Chart(pd.DataFrame({'target': [current_target_f]})).mark_rule(color='orange', strokeDash=[5, 5]).encode(y='target')
+                st.altair_chart(fat_line + target_f_rule, use_container_width=True)
         else:
             st.info("有効な数値データがありません。")
 
