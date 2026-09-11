@@ -141,7 +141,6 @@ if st.sidebar.button("変更を保存する"):
 
 streak = 0
 if not df.empty:
-    # 連続記録（ストリーク）の計算
     try:
         valid_dates = pd.to_datetime(df['日付'], errors='coerce').dropna().dt.date.unique()
         valid_dates = sorted(valid_dates, reverse=True)
@@ -154,7 +153,6 @@ if not df.empty:
     except Exception:
         pass
 
-    # RPG計算
     df_rpg = df.copy()
     df_rpg['parsed_date'] = pd.to_datetime(df_rpg['日付'], errors='coerce')
     df_rpg = df_rpg.dropna(subset=['parsed_date']).sort_values('parsed_date')
@@ -166,28 +164,24 @@ if not df.empty:
     ranks = []
     
     for index, row in df_rpg.iterrows():
-        day_exp = 20 # 記録するだけで+20EXP
+        day_exp = 20 
         
-        # カロリーマイナス達成
         minus = pd.to_numeric(row.get('カロリーマイナス(kcal)', np.nan), errors='coerce')
         if pd.notna(minus) and minus > 0:
             day_exp += 40
             current_ascension_minus_days += 1
             
-        # 運動達成
         exercise = str(row.get('運動内容', 'なし'))
         if exercise != 'なし' and exercise.strip() != '':
             day_exp += 30
             current_ascension_exercise_days += 1
             
-        # 歩数達成
         steps_val = pd.to_numeric(row.get('歩数', np.nan), errors='coerce')
         if pd.notna(steps_val) and steps_val >= 8000:
             day_exp += 10
             
         current_ascension_exp += day_exp
         
-        # 3000 EXP到達でアセンションクリア（ボス戦評価）
         while current_ascension_exp >= 3000:
             if current_ascension_minus_days >= 20 and current_ascension_exercise_days >= 15:
                 ranks.append('S')
@@ -211,7 +205,6 @@ if not df.empty:
     current_floor = current_ascension_exp // 100 + 1
     floor_exp = current_ascension_exp % 100
     
-    # アセンション称号
     if ascension == 0:
         title = "見習い探索者"
     elif ascension < 3:
@@ -240,9 +233,17 @@ if not df.empty:
 # ==========================================
 # 📱 メイン画面のタブ切り替え
 # ==========================================
-selected_tab = st.radio("メニュー", ["📝 記録する", "📈 データを見る"], horizontal=True, label_visibility="collapsed", key="active_tab")
+tab_options = ["📝 記録する", "📈 データを見る"]
+current_index = tab_options.index(st.session_state.active_tab)
 
-if selected_tab == "📝 記録する":
+# keyのバインドを外し、手動で状態を同期する方式に変更
+selected_tab = st.radio("メニュー", tab_options, index=current_index, horizontal=True, label_visibility="collapsed")
+
+if selected_tab != st.session_state.active_tab:
+    st.session_state.active_tab = selected_tab
+    st.rerun()
+
+if st.session_state.active_tab == "📝 記録する":
     st.write("今日のデータを入力してください")
     
     with st.form(key='record_form', clear_on_submit=True):
@@ -276,7 +277,6 @@ if selected_tab == "📝 記録する":
             date_str = record_date.strftime("%Y/%m/%d")
             
             try:
-                # 記録時に最新データを再取得（コンフリクト防止）
                 all_values = worksheet.get('A:N')
                 
                 if not all_values:
@@ -366,7 +366,7 @@ if selected_tab == "📝 記録する":
             except Exception as e:
                 st.error(f"書き込みエラー（データは保護されています）: {e}")
 
-elif selected_tab == "📈 データを見る":
+elif st.session_state.active_tab == "📈 データを見る":
     if st.session_state.success_msg:
         st.success(st.session_state.success_msg)
         st.session_state.success_msg = ""
@@ -391,7 +391,6 @@ elif selected_tab == "📈 データを見る":
                 st.balloons()
                 st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
 
-            # ★ テキスト変更反映（絵文字消去・直近線型回帰分析）
             with st.expander("目標達成予測を見る (直近線型回帰分析)"):
                 if len(df_clean) >= 5:
                     df_recent = df_clean.tail(14).copy()
