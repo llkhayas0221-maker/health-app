@@ -8,7 +8,7 @@ import os
 
 # --- ページ設定とテーマ ---
 st.set_page_config(page_title="健康管理アプリ", page_icon="💪", layout="centered")
-st.title("健康管理ダッシュボード")
+st.title("健康管理")
 
 # --- スプレッドシートの連携設定 ---
 scopes = [
@@ -174,7 +174,7 @@ with tab2:
         try:
             worksheet.update_cell(1, 12, temp_target_weight)
             worksheet.update_cell(1, 13, temp_target_fat)
-            st.sidebar.success("目標をスプレッドシートに保存しました！✨")
+            st.sidebar.success("目標を保存しました！✨")
         except Exception as e:
             st.sidebar.error(f"保存エラー: {e}")
 
@@ -200,7 +200,7 @@ with tab2:
 
                 if latest_weight <= current_target_w and latest_fat <= current_target_f:
                     st.balloons()
-                    st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
+                    st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しましょう。")
 
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.write("■ 朝の体重 (kg)")
