@@ -1,7 +1,7 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import date
+from datetime import date, timedelta
 import pandas as pd
 import altair as alt
 import os
@@ -182,6 +182,33 @@ with tab2:
         if records:
             df = pd.DataFrame(records)
             
+            # --- 🔥 ストリーク（連続記録日数）の計算ロジック ---
+            df['parsed_date'] = pd.to_datetime(df['日付'], errors='coerce')
+            recorded_dates = sorted(df['parsed_date'].dropna().dt.date.unique(), reverse=True)
+            
+            streak = 0
+            if recorded_dates:
+                today = date.today()
+                check_date = today
+                
+                # もし今日記録がなければ、昨日から連続しているかをチェック
+                if recorded_dates[0] != today:
+                    check_date = today - timedelta(days=1)
+                
+                # 連続日数をカウント
+                for d in recorded_dates:
+                    if d == check_date:
+                        streak += 1
+                        check_date -= timedelta(days=1)
+                    elif d < check_date:
+                        break # 日付が途切れたら終了
+
+            # ダッシュボード上部にストリークを表示
+            if streak > 0:
+                st.metric(label="🔥 連続記録日数 (ストリーク)", value=f"{streak} 日目")
+            else:
+                st.metric(label="🔥 連続記録日数 (ストリーク)", value="0 日目（今日も記録しよう！）")
+
             df['朝の体重(kg)'] = pd.to_numeric(df.get('朝の体重(kg)', []), errors='coerce')
             df['体脂肪率(%)'] = pd.to_numeric(df.get('体脂肪率(%)', []), errors='coerce')
             
@@ -221,10 +248,12 @@ with tab2:
             # --- 📋 過去データの一覧＆削除管理セクション ---
             st.markdown("---")
             st.subheader("📋 過去データの確認・削除")
-            st.dataframe(df, use_container_width=True)
+            # 表示用からparsed_date列を除外して綺麗に表示
+            display_df = df.drop(columns=['parsed_date'], errors='ignore')
+            st.dataframe(display_df, use_container_width=True)
 
             with st.expander("🗑️ データの削除を行う"):
-                date_list = df['日付'].dropna().astype(str).tolist()
+                date_list = display_df['日付'].dropna().astype(str).tolist()
                 if date_list:
                     selected_date_to_delete = st.selectbox("削除したい日付を選択", date_list)
                     if st.button("選択した日のデータを削除する", type="primary"):
@@ -233,7 +262,6 @@ with tab2:
                             header = all_values[0]
                             rows = all_values[1:]
                             
-                            # 選択した日付以外の行だけを残す
                             new_rows = [row for row in rows if row and row[0].replace('-', '/') != selected_date_to_delete.replace('-', '/')]
                             
                             worksheet.clear()
