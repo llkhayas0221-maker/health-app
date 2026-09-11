@@ -200,60 +200,58 @@ with tab2:
                     st.balloons()
                     st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
 
-                # --- 🔮 目標達成日の予測機能（直近14日・5日以上データ必須） ---
-                st.markdown("---")
-                st.subheader("🔮 目標達成予測 (直近トレンド分析)")
-                
-                if len(df_clean) >= 5:
-                    df_recent = df_clean.tail(14).copy()
-                    df_recent['parsed_date'] = pd.to_datetime(df_recent['日付'], errors='coerce')
-                    df_recent = df_recent.dropna(subset=['parsed_date']).sort_values('parsed_date')
-                    
-                    if len(df_recent) >= 2:
-                        start_date = df_recent['parsed_date'].iloc[0]
-                        end_date = df_recent['parsed_date'].iloc[-1]
-                        total_days = (end_date - start_date).days
+                # --- 🔮 目標達成予測 (プルダウンで表示・非表示を切替) ---
+                with st.expander("🔮 目標達成予測を見る (直近トレンド分析)"):
+                    if len(df_clean) >= 5:
+                        df_recent = df_clean.tail(14).copy()
+                        df_recent['parsed_date'] = pd.to_datetime(df_recent['日付'], errors='coerce')
+                        df_recent = df_recent.dropna(subset=['parsed_date']).sort_values('parsed_date')
                         
-                        if total_days > 0:
-                            start_w = df_recent['朝の体重(kg)'].iloc[0]
-                            end_w = df_recent['朝の体重(kg)'].iloc[-1]
-                            daily_w_change = (end_w - start_w) / total_days
+                        if len(df_recent) >= 2:
+                            start_date = df_recent['parsed_date'].iloc[0]
+                            end_date = df_recent['parsed_date'].iloc[-1]
+                            total_days = (end_date - start_date).days
                             
-                            start_f = df_recent['体脂肪率(%)'].iloc[0]
-                            end_f = df_recent['体脂肪率(%)'].iloc[-1]
-                            daily_f_change = (end_f - start_f) / total_days
-                            
-                            col_p1, col_p2 = st.columns(2)
-                            
-                            with col_p1:
-                                st.markdown("##### ⚖️ 体重の予測")
-                                if current_target_w >= latest_weight:
-                                    st.success("✨ すでに目標体重に到達しています！")
-                                elif daily_w_change >= 0:
-                                    st.info("📈 現在トレンドが横ばいか増加傾向のため、予測を算出できません。")
-                                else:
-                                    diff_w = latest_weight - current_target_w
-                                    days_to_target_w = int(diff_w / abs(daily_w_change))
-                                    target_date_w = date.today() + timedelta(days=days_to_target_w)
-                                    st.metric(label="目標体重まで", value=f"約 {days_to_target_w} 日", delta=f"予定日: {target_date_w.strftime('%Y/%m/%d')}")
-                            
-                            with col_p2:
-                                st.markdown("##### 📉 体脂肪率の予測")
-                                if current_target_f >= latest_fat:
-                                    st.success("✨ すでに目標体脂肪率に到達しています！")
-                                elif daily_f_change >= 0:
-                                    st.info("📈 現在トレンドが横ばいか増加傾向のため、予測を算出できません。")
-                                else:
-                                    diff_f = latest_fat - current_target_f
-                                    days_to_target_f = int(diff_f / abs(daily_f_change))
-                                    target_date_f = date.today() + timedelta(days=days_to_target_f)
-                                    st.metric(label="目標体脂肪率まで", value=f"約 {days_to_target_f} 日", delta=f"予定日: {target_date_f.strftime('%Y/%m/%d')}")
+                            if total_days > 0:
+                                start_w = df_recent['朝の体重(kg)'].iloc[0]
+                                end_w = df_recent['朝の体重(kg)'].iloc[-1]
+                                daily_w_change = (end_w - start_w) / total_days
+                                
+                                start_f = df_recent['体脂肪率(%)'].iloc[0]
+                                end_f = df_recent['体脂肪率(%)'].iloc[-1]
+                                daily_f_change = (end_f - start_f) / total_days
+                                
+                                col_p1, col_p2 = st.columns(2)
+                                
+                                with col_p1:
+                                    st.markdown("##### ⚖️ 体重の予測")
+                                    if current_target_w >= latest_weight:
+                                        st.success("✨ すでに目標体重に到達しています！")
+                                    elif daily_w_change >= 0:
+                                        st.info("📈 トレンドが横ばいか増加傾向のため算出できません。")
+                                    else:
+                                        diff_w = latest_weight - current_target_w
+                                        days_to_target_w = int(diff_w / abs(daily_w_change))
+                                        target_date_w = date.today() + timedelta(days=days_to_target_w)
+                                        st.metric(label="目標体重まで", value=f"約 {days_to_target_w} 日", delta=f"予定日: {target_date_w.strftime('%Y/%m/%d')}")
+                                
+                                with col_p2:
+                                    st.markdown("##### 📉 体脂肪率の予測")
+                                    if current_target_f >= latest_fat:
+                                        st.success("✨ すでに目標体脂肪率に到達しています！")
+                                    elif daily_f_change >= 0:
+                                        st.info("📈 トレンドが横ばいか増加傾向のため算出できません。")
+                                    else:
+                                        diff_f = latest_fat - current_target_f
+                                        days_to_target_f = int(diff_f / abs(daily_f_change))
+                                        target_date_f = date.today() + timedelta(days=days_to_target_f)
+                                        st.metric(label="目標体脂肪率まで", value=f"約 {days_to_target_f} 日", delta=f"予定日: {target_date_f.strftime('%Y/%m/%d')}")
+                            else:
+                                st.info("予測を計算するための日付間隔が不足しています。")
                         else:
-                            st.info("予測を計算するための日付間隔が不足しています。")
+                            st.info("直近の有効な日付データが不足しています。")
                     else:
-                        st.info("直近の有効な日付データが不足しています。")
-                else:
-                    st.info(f"⏳ あと {5 - len(df_clean)} 日分のデータを入力すると、直近のトレンドに基づいた目標達成予測が表示されます！")
+                        st.info(f"⏳ ああと {5 - len(df_clean)} 日分のデータを入力すると、直近のトレンドに基づいた目標達成予測が表示されます！")
 
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.markdown("---")
