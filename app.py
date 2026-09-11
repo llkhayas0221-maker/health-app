@@ -41,10 +41,8 @@ with tab1:
         record_date = st.date_input("日付", value=date.today())
         weight = st.number_input("朝の体重 (kg)", min_value=0.0, format="%.1f")
         
-        # ご希望の順番：体重 -> 体脂肪率 -> 睡眠時間
         body_fat = st.number_input("体脂肪率 (%)", min_value=0.0, format="%.1f")
         sleep_time = st.text_input("睡眠時間 (例: 7h30m)")
-        
         steps = st.number_input("歩数", min_value=0, step=100)
 
         # --- 2. 運動の入力部分 ---
@@ -64,7 +62,7 @@ with tab1:
             col_pfc1, col_pfc2 = st.columns(2)
             with col_pfc1:
                 protein = st.number_input("タンパク質 (g)", min_value=0.0, format="%.1f")
-                fat = st.number_input("脂質 (g)", min_value=0.0, format="%.1f")
+                fat_input = st.number_input("脂質 (g)", min_value=0.0, format="%.1f")
             with col_pfc2:
                 carbs = st.number_input("炭水化物 (g)", min_value=0.0, format="%.1f")
                 calories = st.number_input("消費カロリー (kcal)", min_value=0, step=10)
@@ -72,23 +70,9 @@ with tab1:
         notes = st.text_area("備考")
         submit_button = st.form_submit_button(label='シートに記録する')
 
-        # --- 保存ボタンを押したときの処理（自動ソート＆上書き対応） ---
+        # --- 保存ボタンを押したときの処理（データマージ＆自動ソート） ---
         if submit_button:
             date_str = record_date.strftime("%Y/%m/%d")
-            
-            new_row_data = [
-                date_str,
-                str(weight) if weight > 0 else "",
-                str(body_fat) if body_fat > 0 else "",
-                str(protein) if protein > 0 else "",
-                str(fat) if fat > 0 else "",
-                str(carbs) if carbs > 0 else "",
-                str(calories) if calories > 0 else "",
-                str(steps) if steps > 0 else "",
-                sleep_time,
-                exercise_content,
-                notes
-            ]
             
             try:
                 # 1. スプレッドシートの全データを取得
@@ -100,18 +84,57 @@ with tab1:
                     header = all_values[0]
                     rows = all_values[1:]
                 
-                # 2. すでに同じ日付の行があれば上書き、なければ追加
-                updated = False
+                # 2. すでに同じ日付のデータがあるか探す
+                existing_row = None
+                target_index = -1
                 for i, row in enumerate(rows):
                     if row and row[0].replace('-', '/') == date_str.replace('-', '/'):
-                        rows[i] = new_row_data
-                        updated = True
+                        existing_row = row
+                        target_index = i
                         break
                 
-                if not updated:
-                    rows.append(new_row_data)
+                # 3. 既存データがある場合は結合（マージ）、なければ空のベースを用意
+                if existing_row:
+                    # 既存行の要素数が足りない場合の保険
+                    while len(existing_row) < 11:
+                        existing_row.append("")
+                    
+                    # 入力がある場合のみ新しい値に更新、なければ古いデータを維持
+                    m_weight = str(weight) if weight > 0 else existing_row[1]
+                    m_fat = str(body_fat) if body_fat > 0 else existing_row[2]
+                    m_protein = str(protein) if protein > 0 else existing_row[3]
+                    m_lipid = str(fat_input) if fat_input > 0 else existing_row[4]
+                    m_carbs = str(carbs) if carbs > 0 else existing_row[5]
+                    m_cals = str(calories) if calories > 0 else existing_row[6]
+                    m_steps = str(steps) if steps > 0 else existing_row[7]
+                    m_sleep = sleep_time if sleep_time.strip() != "" else existing_row[8]
+                    # 運動が「なし」以外、または入力されていれば更新
+                    m_exercise = exercise_content if exercise_content != "なし" else (existing_row[9] if existing_row[9] else "なし")
+                    m_notes = notes if notes.strip() != "" else existing_row[10]
+                    
+                    merged_row = [
+                        date_str, m_weight, m_fat, m_protein, m_lipid, 
+                        m_carbs, m_cals, m_steps, m_sleep, m_exercise, m_notes
+                    ]
+                    rows[target_index] = merged_row
+                else:
+                    # 新規追加の場合
+                    new_row = [
+                        date_str,
+                        str(weight) if weight > 0 else "",
+                        str(body_fat) if body_fat > 0 else "",
+                        str(protein) if protein > 0 else "",
+                        str(fat_input) if fat_input > 0 else "",
+                        str(carbs) if carbs > 0 else "",
+                        str(calories) if calories > 0 else "",
+                        str(steps) if steps > 0 else "",
+                        sleep_time,
+                        exercise_content,
+                        notes
+                    ]
+                    rows.append(new_row)
                 
-                # 3. 日付順（古い順）に綺麗にソート
+                # 4. 日付順（古い順）に綺麗にソート
                 if rows:
                     df_temp = pd.DataFrame(rows)
                     df_temp['parsed_date'] = pd.to_datetime(df_temp[0], errors='coerce')
@@ -121,13 +144,13 @@ with tab1:
                 else:
                     sorted_rows = []
 
-                # 4. スプレッドシートを更新
+                # 5. スプレッドシートを更新
                 worksheet.clear()
                 worksheet.append_row(header)
                 if sorted_rows:
                     worksheet.append_rows(sorted_rows)
                     
-                st.success(f"{date_str} のデータを保存し、日付順に整理しました！🎉")
+                st.success(f"{date_str} のデータを統合・保存しました！🎉")
                     
             except Exception as e:
                 st.error(f"書き込みエラー: {e}")
