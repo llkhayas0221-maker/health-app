@@ -45,16 +45,11 @@ with tab1:
         sleep_time = st.text_input("睡眠時間 (例: 7h30m)")
         steps = st.number_input("歩数", min_value=0, step=100)
 
-        # --- 2. 運動の入力部分 ---
+        # --- 2. 運動の入力部分（その他はテキスト入力を廃止） ---
         st.subheader("運動")
         exercise_options = ["なし", "筋トレ→傾斜", "傾斜ウォーキング", "ランニング", "その他"]
         exercise_selected = st.selectbox("本日の運動内容", exercise_options)
-
-        if exercise_selected == "その他":
-            exercise_other = st.text_input("具体的な運動内容を入力してください")
-            exercise_content = exercise_other
-        else:
-            exercise_content = exercise_selected
+        exercise_content = exercise_selected  # 選択した値をそのまま保存
 
         # --- 3. 食事・栄養データの入力（折りたたみ） ---
         with st.expander("食事・栄養データを入力"):
@@ -75,7 +70,6 @@ with tab1:
             date_str = record_date.strftime("%Y/%m/%d")
             
             try:
-                # 1. スプレッドシートの全データを取得
                 all_values = worksheet.get_all_values()
                 if not all_values:
                     header = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "備考"]
@@ -84,7 +78,6 @@ with tab1:
                     header = all_values[0]
                     rows = all_values[1:]
                 
-                # 2. すでに同じ日付のデータがあるか探す
                 existing_row = None
                 target_index = -1
                 for i, row in enumerate(rows):
@@ -93,13 +86,10 @@ with tab1:
                         target_index = i
                         break
                 
-                # 3. 既存データがある場合は結合（マージ）、なければ空のベースを用意
                 if existing_row:
-                    # 既存行の要素数が足りない場合の保険
                     while len(existing_row) < 11:
                         existing_row.append("")
                     
-                    # 入力がある場合のみ新しい値に更新、なければ古いデータを維持
                     m_weight = str(weight) if weight > 0 else existing_row[1]
                     m_fat = str(body_fat) if body_fat > 0 else existing_row[2]
                     m_protein = str(protein) if protein > 0 else existing_row[3]
@@ -108,7 +98,6 @@ with tab1:
                     m_cals = str(calories) if calories > 0 else existing_row[6]
                     m_steps = str(steps) if steps > 0 else existing_row[7]
                     m_sleep = sleep_time if sleep_time.strip() != "" else existing_row[8]
-                    # 運動が「なし」以外、または入力されていれば更新
                     m_exercise = exercise_content if exercise_content != "なし" else (existing_row[9] if existing_row[9] else "なし")
                     m_notes = notes if notes.strip() != "" else existing_row[10]
                     
@@ -118,7 +107,6 @@ with tab1:
                     ]
                     rows[target_index] = merged_row
                 else:
-                    # 新規追加の場合
                     new_row = [
                         date_str,
                         str(weight) if weight > 0 else "",
@@ -134,7 +122,6 @@ with tab1:
                     ]
                     rows.append(new_row)
                 
-                # 4. 日付順（古い順）に綺麗にソート
                 if rows:
                     df_temp = pd.DataFrame(rows)
                     df_temp['parsed_date'] = pd.to_datetime(df_temp[0], errors='coerce')
@@ -144,7 +131,6 @@ with tab1:
                 else:
                     sorted_rows = []
 
-                # 5. スプレッドシートを更新
                 worksheet.clear()
                 worksheet.append_row(header)
                 if sorted_rows:
@@ -158,9 +144,18 @@ with tab1:
 with tab2:
     st.subheader("体重と体脂肪率の推移")
     
+    # 目標設定の保持（セッション状態を利用）
     st.sidebar.subheader("🎯 目標設定")
-    target_weight = st.sidebar.number_input("目標体重 (kg)", value=60.0, step=0.1)
-    target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=15.0, step=0.1)
+    if 'target_weight' not in st.session_state:
+        st.session_state.target_weight = 60.0
+    if 'target_fat' not in st.session_state:
+        st.session_state.target_fat = 15.0
+
+    target_weight = st.sidebar.number_input("目標体重 (kg)", value=st.session_state.target_weight, step=0.1, key="tw_input")
+    st.session_state.target_weight = target_weight
+
+    target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=st.session_state.target_fat, step=0.1, key="tf_input")
+    st.session_state.target_fat = target_fat
 
     try:
         records = worksheet.get_all_records()
