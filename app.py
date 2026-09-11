@@ -29,6 +29,12 @@ except Exception as e:
     st.error(f"接続エラー\n{e}")
     st.stop()
 
+# --- セッション状態の初期化（目標値の保持用） ---
+if 'target_weight' not in st.session_state:
+    st.session_state.target_weight = 60.0
+if 'target_fat' not in st.session_state:
+    st.session_state.target_fat = 15.0
+
 # --- タブの作成 ---
 tab1, tab2 = st.tabs(["📝 記録する", "📈 データを見る"])
 
@@ -49,7 +55,7 @@ with tab1:
         st.subheader("運動")
         exercise_options = ["なし", "筋トレ→傾斜", "傾斜ウォーキング", "ランニング", "その他"]
         exercise_selected = st.selectbox("本日の運動内容", exercise_options)
-        exercise_content = exercise_selected  # 選択した値をそのまま保存
+        exercise_content = exercise_selected
 
         # --- 3. 食事・栄養データの入力（折りたたみ） ---
         with st.expander("食事・栄養データを入力"):
@@ -144,18 +150,16 @@ with tab1:
 with tab2:
     st.subheader("体重と体脂肪率の推移")
     
-    # 目標設定の保持（セッション状態を利用）
+    # --- サイドバー：目標設定と保存ボタン ---
     st.sidebar.subheader("🎯 目標設定")
-    if 'target_weight' not in st.session_state:
-        st.session_state.target_weight = 60.0
-    if 'target_fat' not in st.session_state:
-        st.session_state.target_fat = 15.0
+    temp_target_weight = st.sidebar.number_input("目標体重 (kg)", value=st.session_state.target_weight, step=0.1)
+    temp_target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=st.session_state.target_fat, step=0.1)
 
-    target_weight = st.sidebar.number_input("目標体重 (kg)", value=st.session_state.target_weight, step=0.1, key="tw_input")
-    st.session_state.target_weight = target_weight
-
-    target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=st.session_state.target_fat, step=0.1, key="tf_input")
-    st.session_state.target_fat = target_fat
+    # 目標体脂肪率のすぐ下に「変更を保存」ボタンを配置
+    if st.sidebar.button("変更を保存する"):
+        st.session_state.target_weight = temp_target_weight
+        st.session_state.target_fat = temp_target_fat
+        st.sidebar.success("目標を保存しました！✨")
 
     try:
         records = worksheet.get_all_records()
@@ -168,6 +172,21 @@ with tab2:
             df_clean = df.dropna(subset=['朝の体重(kg)', '体脂肪率(%)'])
 
             if not df_clean.empty:
+                # --- 目標達成の判定（最新の記録データをチェック） ---
+                latest_row = df_clean.iloc[-1]
+                latest_weight = latest_row['朝の体重(kg)']
+                latest_fat = latest_row['体脂肪率(%)']
+
+                # 体重も体脂肪率も目標値以下（または到達）しているかチェック
+                if latest_weight <= st.session_state.target_weight and latest_fat <= st.session_state.target_fat:
+                    st.balloons()
+                    st.success(f"🎉 おめでとうございます！目標（体重: {st.session_state.target_weight}kg / 体脂肪率: {st.session_state.target_fat}%）を達成しました！")
+                    
+                    st.write("新しい目標を設定しますか？")
+                    if st.button("はい、新しい目標を設定する"):
+                        # サイドバーの入力欄にフォーカスを当てるための案内や、設定変更を促す
+                        st.info("左側のサイドバーから新しい目標体重・体脂肪率を入力し、「変更を保存する」ボタンを押してください！")
+
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.write("■ 朝の体重 (kg)")
                 weight_line = alt.Chart(df_clean).mark_line(point=True).encode(
@@ -175,7 +194,7 @@ with tab2:
                     y=alt.Y('朝の体重(kg)', scale=alt.Scale(zero=False), title='体重(kg)'),
                     tooltip=['日付', '朝の体重(kg)']
                 )
-                target_w_rule = alt.Chart(pd.DataFrame({'target': [target_weight]})).mark_rule(color='red', strokeDash=[5, 5]).encode(y='target')
+                target_w_rule = alt.Chart(pd.DataFrame({'target': [st.session_state.target_weight]})).mark_rule(color='red', strokeDash=[5, 5]).encode(y='target')
                 st.altair_chart(weight_line + target_w_rule, use_container_width=True)
 
                 # --- 体脂肪率グラフ ＋ 目標ライン ---
@@ -185,7 +204,7 @@ with tab2:
                     y=alt.Y('体脂肪率(%)', scale=alt.Scale(zero=False), title='体脂肪率(%)'),
                     tooltip=['日付', '体脂肪率(%)']
                 )
-                target_f_rule = alt.Chart(pd.DataFrame({'target': [target_fat]})).mark_rule(color='orange', strokeDash=[5, 5]).encode(y='target')
+                target_f_rule = alt.Chart(pd.DataFrame({'target': [st.session_state.target_fat]})).mark_rule(color='orange', strokeDash=[5, 5]).encode(y='target')
                 st.altair_chart(fat_line + target_f_rule, use_container_width=True)
             else:
                 st.info("有効な数値データがありません。")
