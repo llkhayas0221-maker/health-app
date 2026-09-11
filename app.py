@@ -8,7 +8,7 @@ import os
 
 # --- ページ設定とテーマ ---
 st.set_page_config(page_title="健康管理アプリ", page_icon="💪", layout="centered")
-st.title("健康管理ダッシュボード")
+st.title("健康管理")
 
 # --- スプレッドシートの連携設定 ---
 scopes = [
@@ -174,7 +174,7 @@ with tab2:
         try:
             worksheet.update_cell(1, 12, temp_target_weight)
             worksheet.update_cell(1, 13, temp_target_fat)
-            st.sidebar.success("目標をスプレッドシートに保存しました！✨")
+            st.sidebar.success("目標を保存しました！✨")
         except Exception as e:
             st.sidebar.error(f"保存エラー: {e}")
 
@@ -198,10 +198,10 @@ with tab2:
 
                 if latest_weight <= current_target_w and latest_fat <= current_target_f:
                     st.balloons()
-                    st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
+                    st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しましょう。")
 
                 # --- 🔮 目標達成予測 (プルダウンで表示・非表示を切替) ---
-                with st.expander("🔮 目標達成予測を見る (直近トレンド分析)"):
+                with st.expander("目標達成予測を見る (直近の線型回帰データ分析)"):
                     if len(df_clean) >= 5:
                         df_recent = df_clean.tail(14).copy()
                         df_recent['parsed_date'] = pd.to_datetime(df_recent['日付'], errors='coerce')
@@ -224,7 +224,7 @@ with tab2:
                                 col_p1, col_p2 = st.columns(2)
                                 
                                 with col_p1:
-                                    st.markdown("##### ⚖️ 体重の予測")
+                                    st.markdown("#####体重の予測")
                                     if current_target_w >= latest_weight:
                                         st.success("✨ すでに目標体重に到達しています！")
                                     elif daily_w_change >= 0:
@@ -236,7 +236,7 @@ with tab2:
                                         st.metric(label="目標体重まで", value=f"約 {days_to_target_w} 日", delta=f"予定日: {target_date_w.strftime('%Y/%m/%d')}")
                                 
                                 with col_p2:
-                                    st.markdown("##### 📉 体脂肪率の予測")
+                                    st.markdown("#####体脂肪率の予測")
                                     if current_target_f >= latest_fat:
                                         st.success("✨ すでに目標体脂肪率に到達しています！")
                                     elif daily_f_change >= 0:
@@ -251,7 +251,7 @@ with tab2:
                         else:
                             st.info("直近の有効な日付データが不足しています。")
                     else:
-                        st.info(f"⏳ ああと {5 - len(df_clean)} 日分のデータを入力すると、直近のトレンドに基づいた目標達成予測が表示されます！")
+                        st.info(f"⏳ あと {5 - len(df_clean)} 日分のデータを入力すると、直近のデータに基づいた目標達成予測が表示されます！")
 
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.markdown("---")
