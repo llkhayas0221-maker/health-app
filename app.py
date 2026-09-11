@@ -6,6 +6,7 @@ import pandas as pd
 import altair as alt
 import os
 import numpy as np
+import io
 
 # --- ページ設定とテーマ ---
 st.set_page_config(page_title="健康管理アプリ", page_icon="💪", layout="centered")
@@ -32,9 +33,8 @@ except Exception as e:
 
 # --- 目標値の読み込み（Z1セル・AA1セル） ---
 try:
-    saved_w_val = worksheet.cell(1, 26).value  # Z列(26)
-    saved_f_val = worksheet.cell(1, 27).value  # AA列(27)
-    
+    saved_w_val = worksheet.cell(1, 26).value
+    saved_f_val = worksheet.cell(1, 27).value
     default_target_w = float(saved_w_val) if saved_w_val and str(saved_w_val).strip() != "" else 60.0
     default_target_f = float(saved_f_val) if saved_f_val and str(saved_f_val).strip() != "" else 15.0
 except Exception:
@@ -46,7 +46,11 @@ if 'saved_target_weight' not in st.session_state:
 if 'saved_target_fat' not in st.session_state:
     st.session_state.saved_target_fat = default_target_f
 
-# --- ヘッダーの基本設定（A列〜N列） ※順番を変更しました ---
+# CSVデータを保持するセッション
+if 'band_data' not in st.session_state:
+    st.session_state.band_data = {}
+
+# --- ヘッダーの基本設定（A列〜N列） ---
 HEADER_DEFAULT = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "総消費カロリー(kcal)", "摂取カロリー(kcal)", "カロリーマイナス(kcal)", "備考"]
 
 # --- カロリー計算関数 ---
@@ -59,7 +63,6 @@ def calc_calories_for_sheet(w_str, f_str, p_str, lipid_str, c_str, active_cals_s
         c = float(c_str) if c_str else 0.0
         active_cals = float(active_cals_str) if active_cals_str else 0.0
         
-        # 基礎代謝 (ステータス: 166.5cm, 20歳, 男性)
         if w > 0:
             mifflin = 10 * w + 6.25 * 166.5 - 5 * 20 + 5
             if f > 0:
@@ -82,23 +85,76 @@ def calc_calories_for_sheet(w_str, f_str, p_str, lipid_str, c_str, active_cals_s
     except:
         return "", "", ""
 
+# --- CSV解析関数 ---
+def parse_smartband_csv(df):
+    parsed = {}
+    # アプリによって表記が違うカラム名を柔軟に探す
+    date_col = next((c for c in df.columns if any(x in c.lower() for x in ['date', '日付', '時間', 'time'])), None)
+    step_col = next((c for c in df.columns if any(x in c.lower() for x in ['step', '歩数', '歩'])), None)
+    sleep_col = next((c for c in df.columns if any(x in c.lower() for x in ['sleep', '睡眠'])), None)
+
+    if date_col:
+        for _, row in df.iterrows():
+            try:
+                d = pd.to_datetime(row[date_col]).strftime("%Y/%m/%d")
+                if d not in parsed:
+                    parsed[d] = {}
+                
+                if step_col and pd.notna(row[step_col]):
+                    parsed[d]['steps'] = int(row[step_col])
+                    
+                if sleep_col and pd.notna(row[sleep_col]):
+                    val = row[sleep_col]
+                    # もし分単位(例:450)で入っていたら時間表記(7h30m)に直す
+                    if isinstance(val, (int, float)) or str(val).isnumeric():
+                        mins = int(val)
+                        parsed[d]['sleep'] = f"{mins//60}h{mins%60}m"
+                    else:
+                        parsed[d]['sleep'] = str(val)
+            except Exception:
+                continue
+    return parsed
+
 # --- タブの作成 ---
 tab1, tab2 = st.tabs(["📝 記録する", "📈 データを見る"])
 
 with tab1:
     st.write("今日のデータを入力してください")
+    
+    # 日付選択を外に出すことで、CSVアップロードと連携しやすくする
+    record_date = st.date_input("📝 記録する日付", value=date.today())
+    date_str = record_date.strftime("%Y/%m/%d")
+
+    # --- スマートバンドのCSVアップロード ---
+    with st.expander("⌚ スマートバンドのデータを取り込む (CSV)"):
+        uploaded_file = st.file_uploader("Mi Fitnessなどの歩数・睡眠CSVを選択", type=["csv"])
+        if uploaded_file is not None:
+            try:
+                df_csv = pd.read_csv(uploaded_file)
+                st.session_state.band_data = parse_smartband_csv(df_csv)
+                if st.session_state.band_data:
+                    st.success("CSVデータの読み込みに成功しました！下の入力欄に自動反映されます✨")
+                else:
+                    st.warning("日付や歩数のデータがうまく見つかりませんでした。")
+            except Exception as e:
+                st.error("CSVファイルの読み込みエラーです。")
+
+    # 指定した日付の自動入力データを取得
+    auto_steps = st.session_state.band_data.get(date_str, {}).get('steps', None)
+    auto_sleep = st.session_state.band_data.get(date_str, {}).get('sleep', "")
+
     with st.form(key='record_form', clear_on_submit=True):
         
         st.subheader("基本データ")
-        record_date = st.date_input("日付", value=date.today())
         weight = st.number_input("朝の体重 (kg)", min_value=0.0, format="%.1f", step=0.1, value=None)
-        
         body_fat = st.number_input("体脂肪率 (%)", min_value=0.0, format="%.1f", step=0.1, value=None)
-        sleep_time = st.text_input("睡眠時間 (例: 7h30m)", value="")
-        steps = st.number_input("歩数", min_value=0, step=100, value=None)
+        
+        # CSVデータがあれば初期値としてセット
+        sleep_time = st.text_input("睡眠時間 (例: 7h30m)", value=auto_sleep)
+        steps = st.number_input("歩数", min_value=0, step=100, value=auto_steps)
 
         st.subheader("運動")
-        exercise_options = ["オフ", "筋トレ→傾斜", "傾斜ウォーキング", "サッカー", "その他"]
+        exercise_options = ["なし", "筋トレ→傾斜", "傾斜ウォーキング", "ランニング", "その他"]
         exercise_selected = st.selectbox("本日の運動内容", exercise_options)
         exercise_content = exercise_selected
 
@@ -116,10 +172,7 @@ with tab1:
         submit_button = st.form_submit_button(label='シートに記録する')
 
         if submit_button:
-            date_str = record_date.strftime("%Y/%m/%d")
-            
             try:
-                # 範囲をA〜N列に限定して取得
                 all_values = worksheet.get('A:N')
                 
                 if not all_values:
@@ -129,7 +182,6 @@ with tab1:
                     header = all_values[0]
                     while len(header) < 14:
                         header.append(HEADER_DEFAULT[len(header)])
-                    # ヘッダーも新しい並びに強制修正
                     header = HEADER_DEFAULT.copy()
                     rows = all_values[1:]
                 
@@ -154,8 +206,6 @@ with tab1:
                     m_steps = str(steps) if steps is not None else existing_row[7]
                     m_sleep = sleep_time if sleep_time.strip() != "" else existing_row[8]
                     m_exercise = exercise_content if exercise_content != "なし" else (existing_row[9] if existing_row[9] else "なし")
-                    
-                    # 備考の位置が変更されたので existing_row[13] を参照
                     m_notes = notes if notes.strip() != "" else existing_row[13]
                     
                     out_burn, out_intake, out_minus = calc_calories_for_sheet(m_weight, m_fat, m_protein, m_lipid, m_carbs, m_cals)
@@ -253,7 +303,7 @@ with tab2:
         try:
             worksheet.update_cell(1, 26, temp_target_weight)
             worksheet.update_cell(1, 27, temp_target_fat)
-            st.sidebar.success("目標を保存しました！")
+            st.sidebar.success("目標をスプレッドシートに保存しました！✨")
         except Exception as e:
             st.sidebar.error(f"保存エラー: {e}")
             
@@ -276,9 +326,9 @@ with tab2:
 
             if latest_weight <= current_target_w and latest_fat <= current_target_f:
                 st.balloons()
-                st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しましょう。")
+                st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
 
-            with st.expander("目標達成予測を見る (直近線型回帰分析)"):
+            with st.expander("🔮 目標達成予測を見る (直近トレンド分析)"):
                 if len(df_clean) >= 5:
                     df_recent = df_clean.tail(14).copy()
                     df_recent['parsed_date'] = pd.to_datetime(df_recent['日付'], errors='coerce')
