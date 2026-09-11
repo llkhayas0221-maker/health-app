@@ -9,7 +9,7 @@ import numpy as np
 
 # --- ページ設定とテーマ ---
 st.set_page_config(page_title="健康管理アプリ", page_icon="💪", layout="centered")
-st.title("健康管理")
+st.title("健康管理log")
 
 # --- カスタムCSS ---
 st.markdown("""
@@ -261,7 +261,6 @@ if st.session_state.active_tab == "📝 記録する":
         exercise_content = exercise_selected
 
         with st.expander("食事・栄養データを入力"):
-            st.write("※必要な場合のみ入力")
             col_pfc1, col_pfc2 = st.columns(2)
             with col_pfc1:
                 protein = st.number_input("タンパク質 (g)", min_value=0.0, format="%.1f", step=0.1, value=None)
@@ -389,7 +388,7 @@ elif st.session_state.active_tab == "📈 データを見る":
 
             if latest_weight <= current_target_w and latest_fat <= current_target_f:
                 st.balloons()
-                st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
+                st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しましょう。")
 
             with st.expander("目標達成予測を見る (直近線型回帰分析)"):
                 if len(df_clean) >= 5:
@@ -481,7 +480,7 @@ elif st.session_state.active_tab == "📈 データを見る":
 
         # --- 📋 過去データの一覧＆削除管理セクション ---
         st.markdown("---")
-        st.subheader("📋 過去データの確認・削除")
+        st.subheader("過去データの確認・削除")
         
         if 'カロリーマイナス(kcal)' in df.columns:
             latest_cals = df.dropna(subset=['カロリーマイナス(kcal)'])
@@ -493,7 +492,7 @@ elif st.session_state.active_tab == "📈 データを見る":
 
         st.dataframe(df, use_container_width=True)
 
-        with st.expander("🗑️ データの削除を行う"):
+        with st.expander("データの削除を行う"):
             date_list = df['日付'].dropna().astype(str).tolist()
             if date_list:
                 selected_date_to_delete = st.selectbox("削除したい日付を選択", date_list)
