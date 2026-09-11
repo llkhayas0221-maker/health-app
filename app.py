@@ -8,7 +8,7 @@ import os
 
 # --- ページ設定とテーマ ---
 st.set_page_config(page_title="健康管理アプリ", page_icon="💪", layout="centered")
-st.title("健康管理")
+st.title("健康管理ダッシュボード")
 
 # --- スプレッドシートの連携設定 ---
 scopes = [
@@ -31,7 +31,6 @@ except Exception as e:
 
 # --- スプレッドシートから保存された目標値を読み込む ---
 try:
-    # L1セル（12列目）に目標体重、M1セル（13列目）に目標体脂肪率を保存する仕様にします
     saved_w_val = worksheet.cell(1, 12).value
     saved_f_val = worksheet.cell(1, 13).value
     
@@ -41,7 +40,6 @@ except Exception:
     default_target_w = 60.0
     default_target_f = 15.0
 
-# セッション状態の初期化
 if 'saved_target_weight' not in st.session_state:
     st.session_state.saved_target_weight = default_target_w
 if 'saved_target_fat' not in st.session_state:
@@ -83,7 +81,6 @@ with tab1:
         notes = st.text_area("備考")
         submit_button = st.form_submit_button(label='シートに記録する')
 
-        # --- 保存ボタンを押したときの処理（データマージ＆自動ソート） ---
         if submit_button:
             date_str = record_date.strftime("%Y/%m/%d")
             
@@ -167,18 +164,16 @@ with tab2:
     temp_target_weight = st.sidebar.number_input("目標体重 (kg)", value=st.session_state.saved_target_weight, step=0.1)
     temp_target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=st.session_state.saved_target_fat, step=0.1)
 
-    # 変更を保存ボタン（スプレッドシートのL1/M1セルに書き込む）
     if st.sidebar.button("変更を保存する"):
         st.session_state.saved_target_weight = temp_target_weight
         st.session_state.saved_target_fat = temp_target_fat
         try:
             worksheet.update_cell(1, 12, temp_target_weight)
             worksheet.update_cell(1, 13, temp_target_fat)
-            st.sidebar.success("目標を保存しました！✨")
+            st.sidebar.success("目標をスプレッドシートに保存しました！✨")
         except Exception as e:
             st.sidebar.error(f"保存エラー: {e}")
 
-    # 現在有効な目標値
     current_target_w = st.session_state.saved_target_weight
     current_target_f = st.session_state.saved_target_fat
 
@@ -193,14 +188,13 @@ with tab2:
             df_clean = df.dropna(subset=['朝の体重(kg)', '体脂肪率(%)'])
 
             if not df_clean.empty:
-                # --- 目標達成の判定（最新の記録データをチェック） ---
                 latest_row = df_clean.iloc[-1]
                 latest_weight = latest_row['朝の体重(kg)']
                 latest_fat = latest_row['体脂肪率(%)']
 
                 if latest_weight <= current_target_w and latest_fat <= current_target_f:
                     st.balloons()
-                    st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しましょう。")
+                    st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
 
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.write("■ 朝の体重 (kg)")
@@ -223,7 +217,37 @@ with tab2:
                 st.altair_chart(fat_line + target_f_rule, use_container_width=True)
             else:
                 st.info("有効な数値データがありません。")
+
+            # --- 📋 過去データの一覧＆削除管理セクション ---
+            st.markdown("---")
+            st.subheader("📋 過去データの確認・削除")
+            st.dataframe(df, use_container_width=True)
+
+            with st.expander("🗑️ データの削除を行う"):
+                date_list = df['日付'].dropna().astype(str).tolist()
+                if date_list:
+                    selected_date_to_delete = st.selectbox("削除したい日付を選択", date_list)
+                    if st.button("選択した日のデータを削除する", type="primary"):
+                        try:
+                            all_values = worksheet.get_all_values()
+                            header = all_values[0]
+                            rows = all_values[1:]
+                            
+                            # 選択した日付以外の行だけを残す
+                            new_rows = [row for row in rows if row and row[0].replace('-', '/') != selected_date_to_delete.replace('-', '/')]
+                            
+                            worksheet.clear()
+                            worksheet.append_row(header)
+                            if new_rows:
+                                worksheet.append_rows(new_rows)
+                            st.success(f"{selected_date_to_delete} のデータを削除しました！")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"削除エラー: {e}")
+                else:
+                    st.info("削除できるデータがありません。")
+
         else:
-            st.info("データがありません。記録を追加するとグラフが表示されます。")
+            st.info("データがありません。記録を追加すると一覧が表示されます。")
     except Exception as e:
         st.warning(f"データの読み込みに失敗しました。詳細: {e}")
