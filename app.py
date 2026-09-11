@@ -41,9 +41,10 @@ with tab1:
         record_date = st.date_input("日付", value=date.today())
         weight = st.number_input("朝の体重 (kg)", min_value=0.0, format="%.1f")
         
-        # 順番を入れ替え：睡眠時間を体脂肪率の上に配置
-        sleep_time = st.text_input("睡眠時間 (例: 7h30m)")
+        # ご希望の順番：体重 -> 体脂肪率 -> 睡眠時間
         body_fat = st.number_input("体脂肪率 (%)", min_value=0.0, format="%.1f")
+        sleep_time = st.text_input("睡眠時間 (例: 7h30m)")
+        
         steps = st.number_input("歩数", min_value=0, step=100)
 
         # --- 2. 運動の入力部分 ---
@@ -51,7 +52,6 @@ with tab1:
         exercise_options = ["なし", "筋トレ→傾斜", "傾斜ウォーキング", "ランニング", "その他"]
         exercise_selected = st.selectbox("本日の運動内容", exercise_options)
 
-        # 「その他」が選ばれた時だけ自由に入力できる
         if exercise_selected == "その他":
             exercise_other = st.text_input("具体的な運動内容を入力してください")
             exercise_content = exercise_other
@@ -72,37 +72,62 @@ with tab1:
         notes = st.text_area("備考")
         submit_button = st.form_submit_button(label='シートに記録する')
 
-        # --- 保存ボタンを押したときの処理（日付で上書き or 追加） ---
+        # --- 保存ボタンを押したときの処理（自動ソート＆上書き対応） ---
         if submit_button:
             date_str = record_date.strftime("%Y/%m/%d")
             
-            row_data = [
+            new_row_data = [
                 date_str,
-                weight if weight > 0 else "",
-                body_fat if body_fat > 0 else "",
-                protein if protein > 0 else "",
-                fat if fat > 0 else "",
-                carbs if carbs > 0 else "",
-                calories if calories > 0 else "",
-                steps if steps > 0 else "",
+                str(weight) if weight > 0 else "",
+                str(body_fat) if body_fat > 0 else "",
+                str(protein) if protein > 0 else "",
+                str(fat) if fat > 0 else "",
+                str(carbs) if carbs > 0 else "",
+                str(calories) if calories > 0 else "",
+                str(steps) if steps > 0 else "",
                 sleep_time,
                 exercise_content,
                 notes
             ]
             
             try:
-                # スプレッドシートのA列（日付）をすべて取得してチェック
-                existing_dates = worksheet.col_values(1) 
-                
-                if date_str in existing_dates:
-                    # すでに同じ日付があれば、その行を特定して上書き更新
-                    row_index = existing_dates.index(date_str) + 1
-                    worksheet.update(f"A{row_index}:K{row_index}", [row_data])
-                    st.success(f"{date_str} のデータを上書き保存しました！🔄")
+                # 1. スプレッドシートの全データを取得
+                all_values = worksheet.get_all_values()
+                if not all_values:
+                    header = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "備考"]
+                    rows = []
                 else:
-                    # 新しい日付なら行を追加
-                    worksheet.append_row(row_data)
-                    st.success(f"{date_str} のデータを新しく追加しました！🎉")
+                    header = all_values[0]
+                    rows = all_values[1:]
+                
+                # 2. すでに同じ日付の行があれば上書き、なければ追加
+                updated = False
+                for i, row in enumerate(rows):
+                    if row and row[0].replace('-', '/') == date_str.replace('-', '/'):
+                        rows[i] = new_row_data
+                        updated = True
+                        break
+                
+                if not updated:
+                    rows.append(new_row_data)
+                
+                # 3. 日付順（古い順）に綺麗にソート
+                if rows:
+                    df_temp = pd.DataFrame(rows)
+                    df_temp['parsed_date'] = pd.to_datetime(df_temp[0], errors='coerce')
+                    df_temp = df_temp.sort_values(by='parsed_date', ascending=True).drop(columns=['parsed_date'])
+                    df_temp = df_temp.dropna(subset=[0])
+                    sorted_rows = df_temp.values.tolist()
+                else:
+                    sorted_rows = []
+
+                # 4. スプレッドシートを更新
+                worksheet.clear()
+                worksheet.append_row(header)
+                if sorted_rows:
+                    worksheet.append_rows(sorted_rows)
+                    
+                st.success(f"{date_str} のデータを保存し、日付順に整理しました！🎉")
                     
             except Exception as e:
                 st.error(f"書き込みエラー: {e}")
@@ -110,7 +135,6 @@ with tab1:
 with tab2:
     st.subheader("体重と体脂肪率の推移")
     
-    # サイドバーで目標値を自由に変更できるように設置
     st.sidebar.subheader("🎯 目標設定")
     target_weight = st.sidebar.number_input("目標体重 (kg)", value=60.0, step=0.1)
     target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=15.0, step=0.1)
@@ -126,7 +150,7 @@ with tab2:
             df_clean = df.dropna(subset=['朝の体重(kg)', '体脂肪率(%)'])
 
             if not df_clean.empty:
-                # --- 体重グラフ ＋ 目標ライン（赤色の破線） ---
+                # --- 体重グラフ ＋ 目標ライン ---
                 st.write("■ 朝の体重 (kg)")
                 weight_line = alt.Chart(df_clean).mark_line(point=True).encode(
                     x=alt.X('日付', title='日付', sort=None),
@@ -136,7 +160,7 @@ with tab2:
                 target_w_rule = alt.Chart(pd.DataFrame({'target': [target_weight]})).mark_rule(color='red', strokeDash=[5, 5]).encode(y='target')
                 st.altair_chart(weight_line + target_w_rule, use_container_width=True)
 
-                # --- 体脂肪率グラフ ＋ 目標ライン（オレンジ色の破線） ---
+                # --- 体脂肪率グラフ ＋ 目標ライン ---
                 st.write("■ 体脂肪率 (%)")
                 fat_line = alt.Chart(df_clean).mark_line(point=True, color='orange').encode(
                     x=alt.X('日付', title='日付', sort=None),
