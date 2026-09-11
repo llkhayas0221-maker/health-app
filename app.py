@@ -98,7 +98,7 @@ with tab1:
         steps = st.number_input("歩数", min_value=0, step=100, value=None)
 
         st.subheader("運動")
-        exercise_options = ["なし", "筋トレ→傾斜", "傾斜ウォーキング", "ランニング", "その他"]
+        exercise_options = ["オフ", "筋トレ→傾斜", "傾斜ウォーキング", "サッカー", "その他"]
         exercise_selected = st.selectbox("本日の運動内容", exercise_options)
         exercise_content = exercise_selected
 
@@ -253,7 +253,7 @@ with tab2:
         try:
             worksheet.update_cell(1, 26, temp_target_weight)
             worksheet.update_cell(1, 27, temp_target_fat)
-            st.sidebar.success("目標をスプレッドシートに保存しました！✨")
+            st.sidebar.success("目標を保存しました！")
         except Exception as e:
             st.sidebar.error(f"保存エラー: {e}")
             
@@ -276,9 +276,9 @@ with tab2:
 
             if latest_weight <= current_target_w and latest_fat <= current_target_f:
                 st.balloons()
-                st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
+                st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しましょう。")
 
-            with st.expander("🔮 目標達成予測を見る (直近トレンド分析)"):
+            with st.expander("目標達成予測を見る (直近線型回帰分析)"):
                 if len(df_clean) >= 5:
                     df_recent = df_clean.tail(14).copy()
                     df_recent['parsed_date'] = pd.to_datetime(df_recent['日付'], errors='coerce')
