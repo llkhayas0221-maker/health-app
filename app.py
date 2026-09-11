@@ -1,7 +1,7 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import date, timedelta
+from datetime import date
 import pandas as pd
 import altair as alt
 import os
@@ -85,6 +85,7 @@ with tab1:
             date_str = record_date.strftime("%Y/%m/%d")
             
             try:
+                # 1. スプレッドシートの全データを取得
                 all_values = worksheet.get_all_values()
                 if not all_values:
                     header = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "備考"]
@@ -141,25 +142,31 @@ with tab1:
                     df_temp = pd.DataFrame(rows)
                     df_temp['parsed_date'] = pd.to_datetime(df_temp[0], errors='coerce')
                     df_temp = df_temp.sort_values(by='parsed_date', ascending=True).drop(columns=['parsed_date'])
+                    
+                    # ⚠️ ここで NaN を強制排除して文字列化する安全対策
+                    df_temp = df_temp.fillna("").astype(str)
                     df_temp = df_temp.dropna(subset=[0])
                     sorted_rows = df_temp.values.tolist()
                 else:
                     sorted_rows = []
 
-                worksheet.clear()
-                worksheet.append_row(header)
-                if sorted_rows:
-                    worksheet.append_rows(sorted_rows)
-                    
-                st.success(f"{date_str} のデータを統合・保存しました！🎉")
+                # ⚠️ 安全装置：データ消失を防ぐガード（もし既存データがあるのに極端にデータが消えそうなら書き込まない）
+                if len(all_values) > 1 and len(sorted_rows) == 0:
+                    st.error("安全装置が作動しました：データ損失を防ぐため書き込みを中断しました。")
+                else:
+                    worksheet.clear()
+                    worksheet.append_row(header)
+                    if sorted_rows:
+                        worksheet.append_rows(sorted_rows)
+                        
+                    st.success(f"{date_str} のデータを統合・保存しました！🎉")
                     
             except Exception as e:
-                st.error(f"書き込みエラー: {e}")
+                st.error(f"書き込みエラー（データは保護されています）: {e}")
 
 with tab2:
     st.subheader("体重と体脂肪率の推移")
     
-    # --- サイドバー：目標設定と保存ボタン ---
     st.sidebar.subheader("🎯 目標設定")
     temp_target_weight = st.sidebar.number_input("目標体重 (kg)", value=st.session_state.saved_target_weight, step=0.1)
     temp_target_fat = st.sidebar.number_input("目標体脂肪率 (%)", value=st.session_state.saved_target_fat, step=0.1)
@@ -182,28 +189,6 @@ with tab2:
         if records:
             df = pd.DataFrame(records)
             
-            # --- 🔥 ストリーク（連続記録日数）の計算 ---
-            df['parsed_date'] = pd.to_datetime(df['日付'], errors='coerce')
-            recorded_dates = sorted(df['parsed_date'].dropna().dt.date.unique(), reverse=True)
-            
-            streak = 0
-            if recorded_dates:
-                today = date.today()
-                check_date = today
-                if recorded_dates[0] != today:
-                    check_date = today - timedelta(days=1)
-                for d in recorded_dates:
-                    if d == check_date:
-                        streak += 1
-                        check_date -= timedelta(days=1)
-                    elif d < check_date:
-                        break
-
-            if streak > 0:
-                st.metric(label="🔥 連続記録日数 (ストリーク)", value=f"{streak} 日目")
-            else:
-                st.metric(label="🔥 連続記録日数 (ストリーク)", value="0 日目（今日も記録しよう！）")
-
             df['朝の体重(kg)'] = pd.to_numeric(df.get('朝の体重(kg)', []), errors='coerce')
             df['体脂肪率(%)'] = pd.to_numeric(df.get('体脂肪率(%)', []), errors='coerce')
             
@@ -217,25 +202,6 @@ with tab2:
                 if latest_weight <= current_target_w and latest_fat <= current_target_f:
                     st.balloons()
                     st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
-
-                # --- 📈 10日分以上集まった場合の目標達成予測アルゴリズム ---
-                if len(df_clean) >= 10:
-                    # 直近10日間のデータからトレンドを計算
-                    df_recent = df_clean.tail(10)
-                    start_w = df_recent.iloc[0]['朝の体重(kg)']
-                    end_w = df_recent.iloc[-1]['朝の体重(kg)']
-                    days_diff = (df_recent.iloc[-1]['parsed_date'] - df_recent.iloc[0]['parsed_date']).days
-                    
-                    if days_diff > 0:
-                        daily_rate = (end_w - start_w) / days_diff  # 1日あたりの増減スピード (kg/日)
-                        weight_diff = current_target_w - latest_weight  # 目標までの残り体重差
-                        
-                        # 増減スピードの向きと目標が一致しているかチェック（減量中ならマイナス、増量中ならプラス）
-                        if daily_rate != 0 and (weight_diff * daily_rate > 0):
-                            days_to_target = int(weight_diff / daily_rate)
-                            if days_to_target > 0:
-                                target_date = date.today() + timedelta(days=days_to_target)
-                                st.info(f"🔮 **目標達成予測**: このままの直近のペース（1日あたり {daily_rate:+.2f}kg）で行くと、約 **{days_to_target}日後**（{target_date.strftime('%Y年%m月%d日')}頃）に目標体重に到達する見込みです！")
 
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.write("■ 朝の体重 (kg)")
@@ -262,11 +228,10 @@ with tab2:
             # --- 📋 過去データの一覧＆削除管理セクション ---
             st.markdown("---")
             st.subheader("📋 過去データの確認・削除")
-            display_df = df.drop(columns=['parsed_date'], errors='ignore')
-            st.dataframe(display_df, use_container_width=True)
+            st.dataframe(df, use_container_width=True)
 
             with st.expander("🗑️ データの削除を行う"):
-                date_list = display_df['日付'].dropna().astype(str).tolist()
+                date_list = df['日付'].dropna().astype(str).tolist()
                 if date_list:
                     selected_date_to_delete = st.selectbox("削除したい日付を選択", date_list)
                     if st.button("選択した日のデータを削除する", type="primary"):
