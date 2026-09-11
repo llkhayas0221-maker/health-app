@@ -30,7 +30,7 @@ except Exception as e:
     st.error(f"接続エラー\n{e}")
     st.stop()
 
-# --- 目標値の読み込み（Z1セル・AA1セルに移動して邪魔にならないようにする） ---
+# --- 目標値の読み込み（Z1セル・AA1セル） ---
 try:
     saved_w_val = worksheet.cell(1, 26).value  # Z列(26)
     saved_f_val = worksheet.cell(1, 27).value  # AA列(27)
@@ -46,7 +46,10 @@ if 'saved_target_weight' not in st.session_state:
 if 'saved_target_fat' not in st.session_state:
     st.session_state.saved_target_fat = default_target_f
 
-# --- カロリー計算関数（保存時にシートへ書き込む用） ---
+# --- ヘッダーの基本設定（A列〜N列） ※順番を変更しました ---
+HEADER_DEFAULT = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "総消費カロリー(kcal)", "摂取カロリー(kcal)", "カロリーマイナス(kcal)", "備考"]
+
+# --- カロリー計算関数 ---
 def calc_calories_for_sheet(w_str, f_str, p_str, lipid_str, c_str, active_cals_str):
     try:
         w = float(w_str) if w_str else 0.0
@@ -86,7 +89,6 @@ with tab1:
     st.write("今日のデータを入力してください")
     with st.form(key='record_form', clear_on_submit=True):
         
-        # --- 1. 基本データの入力部分 ---
         st.subheader("基本データ")
         record_date = st.date_input("日付", value=date.today())
         weight = st.number_input("朝の体重 (kg)", min_value=0.0, format="%.1f", step=0.1, value=None)
@@ -95,13 +97,11 @@ with tab1:
         sleep_time = st.text_input("睡眠時間 (例: 7h30m)", value="")
         steps = st.number_input("歩数", min_value=0, step=100, value=None)
 
-        # --- 2. 運動の入力部分 ---
         st.subheader("運動")
         exercise_options = ["なし", "筋トレ→傾斜", "傾斜ウォーキング", "ランニング", "その他"]
         exercise_selected = st.selectbox("本日の運動内容", exercise_options)
         exercise_content = exercise_selected
 
-        # --- 3. 食事・栄養データの入力 ---
         with st.expander("食事・栄養データを入力"):
             st.write("※必要な場合のみ入力")
             col_pfc1, col_pfc2 = st.columns(2)
@@ -119,17 +119,18 @@ with tab1:
             date_str = record_date.strftime("%Y/%m/%d")
             
             try:
-                all_values = worksheet.get_all_values()
-                header_default = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "備考", "総消費カロリー(kcal)", "摂取カロリー(kcal)", "カロリーマイナス(kcal)"]
+                # 範囲をA〜N列に限定して取得
+                all_values = worksheet.get('A:N')
                 
                 if not all_values:
-                    header = header_default
+                    header = HEADER_DEFAULT.copy()
                     rows = []
                 else:
                     header = all_values[0]
-                    # シートに新しい列（L, M, N列）がない場合はヘッダーを拡張する
                     while len(header) < 14:
-                        header.append(header_default[len(header)])
+                        header.append(HEADER_DEFAULT[len(header)])
+                    # ヘッダーも新しい並びに強制修正
+                    header = HEADER_DEFAULT.copy()
                     rows = all_values[1:]
                 
                 existing_row = None
@@ -153,15 +154,16 @@ with tab1:
                     m_steps = str(steps) if steps is not None else existing_row[7]
                     m_sleep = sleep_time if sleep_time.strip() != "" else existing_row[8]
                     m_exercise = exercise_content if exercise_content != "なし" else (existing_row[9] if existing_row[9] else "なし")
-                    m_notes = notes if notes.strip() != "" else existing_row[10]
                     
-                    # 保存時にカロリー情報を計算
+                    # 備考の位置が変更されたので existing_row[13] を参照
+                    m_notes = notes if notes.strip() != "" else existing_row[13]
+                    
                     out_burn, out_intake, out_minus = calc_calories_for_sheet(m_weight, m_fat, m_protein, m_lipid, m_carbs, m_cals)
                     
                     merged_row = [
                         date_str, m_weight, m_fat, m_protein, m_lipid, 
-                        m_carbs, m_cals, m_steps, m_sleep, m_exercise, m_notes,
-                        out_burn, out_intake, out_minus
+                        m_carbs, m_cals, m_steps, m_sleep, m_exercise,
+                        out_burn, out_intake, out_minus, m_notes
                     ]
                     rows[target_index] = merged_row
                 else:
@@ -173,13 +175,12 @@ with tab1:
                     m_cals = str(calories) if calories is not None else ""
                     m_steps = str(steps) if steps is not None else ""
                     
-                    # 保存時にカロリー情報を計算
                     out_burn, out_intake, out_minus = calc_calories_for_sheet(m_weight, m_fat, m_protein, m_lipid, m_carbs, m_cals)
                     
                     new_row = [
                         date_str, m_weight, m_fat, m_protein, m_lipid, 
-                        m_carbs, m_cals, m_steps, sleep_time, exercise_content, notes,
-                        out_burn, out_intake, out_minus
+                        m_carbs, m_cals, m_steps, sleep_time, exercise_content,
+                        out_burn, out_intake, out_minus, notes
                     ]
                     rows.append(new_row)
                 
@@ -197,10 +198,12 @@ with tab1:
                 if len(all_values) > 1 and len(sorted_rows) == 0:
                     st.error("安全装置が作動しました：データ損失を防ぐため書き込みを中断しました。")
                 else:
-                    worksheet.clear()
-                    worksheet.append_row(header)
-                    if sorted_rows:
-                        worksheet.append_rows(sorted_rows)
+                    data_to_write = [header] + sorted_rows
+                    worksheet.batch_clear(["A:N"])
+                    try:
+                        worksheet.update(range_name="A1", values=data_to_write)
+                    except TypeError:
+                        worksheet.update("A1", data_to_write)
                         
                     st.success(f"{date_str} のデータを統合・保存しました！🎉")
                     
@@ -210,16 +213,21 @@ with tab1:
 with tab2:
     st.subheader("体重と体脂肪率の推移")
     
-    # --- データ読み込みと共通処理 ---
-    records = []
+    # --- データ読み込み（A〜N列のみ） ---
+    df = pd.DataFrame()
     try:
-        records = worksheet.get_all_records()
+        data = worksheet.get('A:N')
+        if data and len(data) > 1:
+            header = HEADER_DEFAULT.copy()
+            valid_rows = []
+            for r in data[1:]:
+                padded = r + [""] * (14 - len(r))
+                valid_rows.append(padded[:14])
+            df = pd.DataFrame(valid_rows, columns=header)
     except Exception as e:
         st.warning(f"データの読み込みに失敗しました。詳細: {e}")
-
-    df = pd.DataFrame(records) if records else pd.DataFrame()
     
-    # --- ストリーク（連続記録）の計算と控えめな表示 ---
+    # --- ストリーク（連続記録）の計算 ---
     streak = 0
     if not df.empty:
         try:
@@ -243,7 +251,6 @@ with tab2:
         st.session_state.saved_target_weight = temp_target_weight
         st.session_state.saved_target_fat = temp_target_fat
         try:
-            # 新しい保存先：Z列(26)とAA列(27)
             worksheet.update_cell(1, 26, temp_target_weight)
             worksheet.update_cell(1, 27, temp_target_fat)
             st.sidebar.success("目標をスプレッドシートに保存しました！✨")
@@ -348,10 +355,8 @@ with tab2:
         st.markdown("---")
         st.subheader("📋 過去データの確認・削除")
         
-        # 控えめなカロリーマイナス表示（シートに保存された最新データを参照）
         if 'カロリーマイナス(kcal)' in df.columns:
             latest_cals = df.dropna(subset=['カロリーマイナス(kcal)'])
-            # 文字列になっている可能性もあるので数値化して空でないものを探す
             latest_cals = latest_cals[pd.to_numeric(latest_cals['カロリーマイナス(kcal)'], errors='coerce').notna()]
             if not latest_cals.empty:
                 c_val = float(latest_cals.iloc[-1]['カロリーマイナス(kcal)'])
@@ -366,16 +371,19 @@ with tab2:
                 selected_date_to_delete = st.selectbox("削除したい日付を選択", date_list)
                 if st.button("選択した日のデータを削除する", type="primary"):
                     try:
-                        all_values = worksheet.get_all_values()
+                        all_values = worksheet.get('A:N')
                         header = all_values[0]
                         rows = all_values[1:]
                         
                         new_rows = [row for row in rows if row and row[0].replace('-', '/') != selected_date_to_delete.replace('-', '/')]
                         
-                        worksheet.clear()
-                        worksheet.append_row(header)
-                        if new_rows:
-                            worksheet.append_rows(new_rows)
+                        data_to_write = [header] + new_rows
+                        worksheet.batch_clear(["A:N"])
+                        try:
+                            worksheet.update(range_name="A1", values=data_to_write)
+                        except TypeError:
+                            worksheet.update("A1", data_to_write)
+                            
                         st.success(f"{selected_date_to_delete} のデータを削除しました！")
                         st.rerun()
                     except Exception as e:
