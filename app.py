@@ -30,10 +30,10 @@ except Exception as e:
     st.error(f"接続エラー\n{e}")
     st.stop()
 
-# --- スプレッドシートから保存された目標値を読み込む ---
+# --- 目標値の読み込み（Z1セル・AA1セルに移動して邪魔にならないようにする） ---
 try:
-    saved_w_val = worksheet.cell(1, 12).value
-    saved_f_val = worksheet.cell(1, 13).value
+    saved_w_val = worksheet.cell(1, 26).value  # Z列(26)
+    saved_f_val = worksheet.cell(1, 27).value  # AA列(27)
     
     default_target_w = float(saved_w_val) if saved_w_val and str(saved_w_val).strip() != "" else 60.0
     default_target_f = float(saved_f_val) if saved_f_val and str(saved_f_val).strip() != "" else 15.0
@@ -46,6 +46,39 @@ if 'saved_target_weight' not in st.session_state:
 if 'saved_target_fat' not in st.session_state:
     st.session_state.saved_target_fat = default_target_f
 
+# --- カロリー計算関数（保存時にシートへ書き込む用） ---
+def calc_calories_for_sheet(w_str, f_str, p_str, lipid_str, c_str, active_cals_str):
+    try:
+        w = float(w_str) if w_str else 0.0
+        f = float(f_str) if f_str else 0.0
+        p = float(p_str) if p_str else 0.0
+        lipid = float(lipid_str) if lipid_str else 0.0
+        c = float(c_str) if c_str else 0.0
+        active_cals = float(active_cals_str) if active_cals_str else 0.0
+        
+        # 基礎代謝 (ステータス: 166.5cm, 20歳, 男性)
+        if w > 0:
+            mifflin = 10 * w + 6.25 * 166.5 - 5 * 20 + 5
+            if f > 0:
+                lbm = w * (1 - f / 100)
+                katch = 370 + 21.6 * lbm
+                bmr = (mifflin + katch) / 2
+            else:
+                bmr = mifflin
+        else:
+            bmr = 0.0
+            
+        total_burn = bmr + active_cals
+        intake = p * 4 + lipid * 9 + c * 4
+        
+        out_burn = f"{total_burn:.0f}" if total_burn > 0 else ""
+        out_intake = f"{intake:.0f}" if intake > 0 else ""
+        out_minus = f"{(total_burn - intake):.0f}" if (intake > 0 and total_burn > 0) else ""
+        
+        return out_burn, out_intake, out_minus
+    except:
+        return "", "", ""
+
 # --- タブの作成 ---
 tab1, tab2 = st.tabs(["📝 記録する", "📈 データを見る"])
 
@@ -53,7 +86,7 @@ with tab1:
     st.write("今日のデータを入力してください")
     with st.form(key='record_form', clear_on_submit=True):
         
-        # --- 1. 基本データの入力部分（タップですぐ入力できるよう value=None を設定） ---
+        # --- 1. 基本データの入力部分 ---
         st.subheader("基本データ")
         record_date = st.date_input("日付", value=date.today())
         weight = st.number_input("朝の体重 (kg)", min_value=0.0, format="%.1f", step=0.1, value=None)
@@ -68,7 +101,7 @@ with tab1:
         exercise_selected = st.selectbox("本日の運動内容", exercise_options)
         exercise_content = exercise_selected
 
-        # --- 3. 食事・栄養データの入力（折りたたみ） ---
+        # --- 3. 食事・栄養データの入力 ---
         with st.expander("食事・栄養データを入力"):
             st.write("※必要な場合のみ入力")
             col_pfc1, col_pfc2 = st.columns(2)
@@ -87,11 +120,16 @@ with tab1:
             
             try:
                 all_values = worksheet.get_all_values()
+                header_default = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "備考", "総消費カロリー(kcal)", "摂取カロリー(kcal)", "カロリーマイナス(kcal)"]
+                
                 if not all_values:
-                    header = ["日付", "朝の体重(kg)", "体脂肪率(%)", "タンパク質(g)", "脂質(g)", "炭水化物(g)", "消費カロリー(kcal)", "歩数", "睡眠時間", "運動内容", "備考"]
+                    header = header_default
                     rows = []
                 else:
                     header = all_values[0]
+                    # シートに新しい列（L, M, N列）がない場合はヘッダーを拡張する
+                    while len(header) < 14:
+                        header.append(header_default[len(header)])
                     rows = all_values[1:]
                 
                 existing_row = None
@@ -103,7 +141,7 @@ with tab1:
                         break
                 
                 if existing_row:
-                    while len(existing_row) < 11:
+                    while len(existing_row) < 14:
                         existing_row.append("")
                     
                     m_weight = str(weight) if weight is not None else existing_row[1]
@@ -117,24 +155,31 @@ with tab1:
                     m_exercise = exercise_content if exercise_content != "なし" else (existing_row[9] if existing_row[9] else "なし")
                     m_notes = notes if notes.strip() != "" else existing_row[10]
                     
+                    # 保存時にカロリー情報を計算
+                    out_burn, out_intake, out_minus = calc_calories_for_sheet(m_weight, m_fat, m_protein, m_lipid, m_carbs, m_cals)
+                    
                     merged_row = [
                         date_str, m_weight, m_fat, m_protein, m_lipid, 
-                        m_carbs, m_cals, m_steps, m_sleep, m_exercise, m_notes
+                        m_carbs, m_cals, m_steps, m_sleep, m_exercise, m_notes,
+                        out_burn, out_intake, out_minus
                     ]
                     rows[target_index] = merged_row
                 else:
+                    m_weight = str(weight) if weight is not None else ""
+                    m_fat = str(body_fat) if body_fat is not None else ""
+                    m_protein = str(protein) if protein is not None else ""
+                    m_lipid = str(fat_input) if fat_input is not None else ""
+                    m_carbs = str(carbs) if carbs is not None else ""
+                    m_cals = str(calories) if calories is not None else ""
+                    m_steps = str(steps) if steps is not None else ""
+                    
+                    # 保存時にカロリー情報を計算
+                    out_burn, out_intake, out_minus = calc_calories_for_sheet(m_weight, m_fat, m_protein, m_lipid, m_carbs, m_cals)
+                    
                     new_row = [
-                        date_str,
-                        str(weight) if weight is not None else "",
-                        str(body_fat) if body_fat is not None else "",
-                        str(protein) if protein is not None else "",
-                        str(fat_input) if fat_input is not None else "",
-                        str(carbs) if carbs is not None else "",
-                        str(calories) if calories is not None else "",
-                        str(steps) if steps is not None else "",
-                        sleep_time,
-                        exercise_content,
-                        notes
+                        date_str, m_weight, m_fat, m_protein, m_lipid, 
+                        m_carbs, m_cals, m_steps, sleep_time, exercise_content, notes,
+                        out_burn, out_intake, out_minus
                     ]
                     rows.append(new_row)
                 
@@ -198,13 +243,13 @@ with tab2:
         st.session_state.saved_target_weight = temp_target_weight
         st.session_state.saved_target_fat = temp_target_fat
         try:
-            worksheet.update_cell(1, 12, temp_target_weight)
-            worksheet.update_cell(1, 13, temp_target_fat)
+            # 新しい保存先：Z列(26)とAA列(27)
+            worksheet.update_cell(1, 26, temp_target_weight)
+            worksheet.update_cell(1, 27, temp_target_fat)
             st.sidebar.success("目標をスプレッドシートに保存しました！✨")
         except Exception as e:
             st.sidebar.error(f"保存エラー: {e}")
             
-    # ストリークをサイドバーの下部にひっそりと配置
     if streak > 0:
         st.sidebar.markdown(f"<div style='text-align: left; color: #888; font-size: 0.9em; margin-top: 10px;'>🔥 {streak}日間 記録継続中</div>", unsafe_allow_html=True)
 
@@ -214,34 +259,6 @@ with tab2:
     if not df.empty:
         df['朝の体重(kg)'] = pd.to_numeric(df.get('朝の体重(kg)', []), errors='coerce')
         df['体脂肪率(%)'] = pd.to_numeric(df.get('体脂肪率(%)', []), errors='coerce')
-        
-        # --- 基礎代謝とカロリーマイナス計算 ---
-        def calc_bmr(w, f):
-            if pd.isna(w): return np.nan
-            # 指定ステータス(166.5cm/20歳/男)でのMifflin-St Jeor式
-            mifflin = 10 * w + 6.25 * 166.5 - 5 * 20 + 5
-            # 体脂肪率がある場合はKatch-McArdle式と平均をとり精度を高める
-            if pd.notna(f) and f > 0:
-                lbm = w * (1 - f / 100)
-                katch = 370 + 21.6 * lbm
-                return (mifflin + katch) / 2
-            return mifflin
-
-        df['タンパク質(g)'] = pd.to_numeric(df.get('タンパク質(g)', []), errors='coerce').fillna(0)
-        df['脂質(g)'] = pd.to_numeric(df.get('脂質(g)', []), errors='coerce').fillna(0)
-        df['炭水化物(g)'] = pd.to_numeric(df.get('炭水化物(g)', []), errors='coerce').fillna(0)
-        df['消費カロリー(kcal)'] = pd.to_numeric(df.get('消費カロリー(kcal)', []), errors='coerce').fillna(0)
-
-        df['基礎代謝(推定kcal)'] = df.apply(lambda x: calc_bmr(x['朝の体重(kg)'], x['体脂肪率(%)']), axis=1)
-        df['摂取カロリー(kcal)'] = df['タンパク質(g)'] * 4 + df['脂質(g)'] * 9 + df['炭水化物(g)'] * 4
-        
-        # カロリーマイナス = (基礎代謝 + 消費カロリー) - 摂取カロリー
-        # PFCが入力されている日のみ算出
-        df['カロリーマイナス(kcal)'] = df.apply(
-            lambda x: (x['基礎代謝(推定kcal)'] + x['消費カロリー(kcal)']) - x['摂取カロリー(kcal)'] 
-            if x['摂取カロリー(kcal)'] > 0 else np.nan, 
-            axis=1
-        )
         
         df_clean = df.dropna(subset=['朝の体重(kg)', '体脂肪率(%)'])
 
@@ -331,21 +348,17 @@ with tab2:
         st.markdown("---")
         st.subheader("📋 過去データの確認・削除")
         
-        # 控えめなカロリーマイナス表示
-        latest_cals = df.dropna(subset=['カロリーマイナス(kcal)']).tail(1)
-        if not latest_cals.empty:
-            c_val = latest_cals.iloc[0]['カロリーマイナス(kcal)']
-            c_date = latest_cals.iloc[0]['日付']
-            st.caption(f"💡 {c_date} の推定カロリーマイナス: {c_val:,.0f} kcal")
+        # 控えめなカロリーマイナス表示（シートに保存された最新データを参照）
+        if 'カロリーマイナス(kcal)' in df.columns:
+            latest_cals = df.dropna(subset=['カロリーマイナス(kcal)'])
+            # 文字列になっている可能性もあるので数値化して空でないものを探す
+            latest_cals = latest_cals[pd.to_numeric(latest_cals['カロリーマイナス(kcal)'], errors='coerce').notna()]
+            if not latest_cals.empty:
+                c_val = float(latest_cals.iloc[-1]['カロリーマイナス(kcal)'])
+                c_date = latest_cals.iloc[-1]['日付']
+                st.caption(f"💡 {c_date} の推定カロリーマイナス: {c_val:,.0f} kcal")
 
-        # テーブル表示用に表示を丸める
-        display_df = df.copy()
-        if '基礎代謝(推定kcal)' in display_df.columns:
-            display_df['基礎代謝(推定kcal)'] = display_df['基礎代謝(推定kcal)'].round(0)
-        if 'カロリーマイナス(kcal)' in display_df.columns:
-            display_df['カロリーマイナス(kcal)'] = display_df['カロリーマイナス(kcal)'].round(0)
-            
-        st.dataframe(display_df, use_container_width=True)
+        st.dataframe(df, use_container_width=True)
 
         with st.expander("🗑️ データの削除を行う"):
             date_list = df['日付'].dropna().astype(str).tolist()
