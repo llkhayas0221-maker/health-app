@@ -182,7 +182,7 @@ with tab2:
         if records:
             df = pd.DataFrame(records)
             
-            # --- 🔥 ストリーク（連続記録日数）の計算ロジック ---
+            # --- 🔥 ストリーク（連続記録日数）の計算 ---
             df['parsed_date'] = pd.to_datetime(df['日付'], errors='coerce')
             recorded_dates = sorted(df['parsed_date'].dropna().dt.date.unique(), reverse=True)
             
@@ -190,20 +190,15 @@ with tab2:
             if recorded_dates:
                 today = date.today()
                 check_date = today
-                
-                # もし今日記録がなければ、昨日から連続しているかをチェック
                 if recorded_dates[0] != today:
                     check_date = today - timedelta(days=1)
-                
-                # 連続日数をカウント
                 for d in recorded_dates:
                     if d == check_date:
                         streak += 1
                         check_date -= timedelta(days=1)
                     elif d < check_date:
-                        break # 日付が途切れたら終了
+                        break
 
-            # ダッシュボード上部にストリークを表示
             if streak > 0:
                 st.metric(label="🔥 連続記録日数 (ストリーク)", value=f"{streak} 日目")
             else:
@@ -222,6 +217,25 @@ with tab2:
                 if latest_weight <= current_target_w and latest_fat <= current_target_f:
                     st.balloons()
                     st.success(f"🎉 おめでとうございます！目標（体重: {current_target_w}kg / 体脂肪率: {current_target_f}%）を達成しました！新しい目標を設定しよう。")
+
+                # --- 📈 10日分以上集まった場合の目標達成予測アルゴリズム ---
+                if len(df_clean) >= 10:
+                    # 直近10日間のデータからトレンドを計算
+                    df_recent = df_clean.tail(10)
+                    start_w = df_recent.iloc[0]['朝の体重(kg)']
+                    end_w = df_recent.iloc[-1]['朝の体重(kg)']
+                    days_diff = (df_recent.iloc[-1]['parsed_date'] - df_recent.iloc[0]['parsed_date']).days
+                    
+                    if days_diff > 0:
+                        daily_rate = (end_w - start_w) / days_diff  # 1日あたりの増減スピード (kg/日)
+                        weight_diff = current_target_w - latest_weight  # 目標までの残り体重差
+                        
+                        # 増減スピードの向きと目標が一致しているかチェック（減量中ならマイナス、増量中ならプラス）
+                        if daily_rate != 0 and (weight_diff * daily_rate > 0):
+                            days_to_target = int(weight_diff / daily_rate)
+                            if days_to_target > 0:
+                                target_date = date.today() + timedelta(days=days_to_target)
+                                st.info(f"🔮 **目標達成予測**: このままの直近のペース（1日あたり {daily_rate:+.2f}kg）で行くと、約 **{days_to_target}日後**（{target_date.strftime('%Y年%m月%d日')}頃）に目標体重に到達する見込みです！")
 
                 # --- 体重グラフ ＋ 目標ライン ---
                 st.write("■ 朝の体重 (kg)")
@@ -248,7 +262,6 @@ with tab2:
             # --- 📋 過去データの一覧＆削除管理セクション ---
             st.markdown("---")
             st.subheader("📋 過去データの確認・削除")
-            # 表示用からparsed_date列を除外して綺麗に表示
             display_df = df.drop(columns=['parsed_date'], errors='ignore')
             st.dataframe(display_df, use_container_width=True)
 
